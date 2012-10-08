@@ -1,0 +1,94 @@
+#!/bin/bash
+# Source this file to create a function allocation space and enable first-class
+# functions in the shell.
+
+export BASH_LAMBDA_HEAP=${BASH_LAMBDA_HEAP:-/tmp/bash-lambda-heap-$$}
+mkdir -p $BASH_LAMBDA_HEAP || return 1
+bash_lambda_nuke_heap() { rm -rf $BASH_LAMBDA_HEAP; }
+trap bash_lambda_nuke_heap EXIT
+export PATH="$PATH:$BASH_LAMBDA_HEAP"
+
+# Heap allocation
+bash_lambda_gensym() { echo "${1:-gensym}_$$_$(date +%s_%N)"; }
+
+bash_lambda_cons() {
+  declare file=$BASH_LAMBDA_HEAP/$(bash_lambda_gensym $1)
+  if [[ $1 == '-n' ]]; then file=$BASH_LAMBDA_HEAP/$2; fi
+  cat - > $file &&      # Take everything from stdin
+    chmod u+x $file &&  # All conses are executable
+    echo $file          # Return the filename
+}
+
+# Function/closure allocation
+bash_lambda_fn_body() {
+  echo '#!/bin/bash';
+  for (( i = 1; i <= $#; i += 1 )); do
+    if (( $i < $# )); then echo "declare -r ${!i}=\$$i"
+    else                   echo "${!i}"; fi
+  done; }
+
+bash_lambda_fn() {
+  # Yup, we're allocating closures by writing to files and returning their
+  # names to the callers. This gives you controllable persistence, heap
+  # allocation, and the ability to reference the same closures across multiple
+  # processes.
+  bash_lambda_fn_body "$@" | bash_lambda_cons fn; }
+
+bash_lambda_cons_fn() {
+  # Same as bash_lambda_fn, but body is specified from stdin. Useful for
+  # multiline functions when used with heredocs.
+  (bash_lambda_fn_body "$@" ''; cat -) | bash_lambda_cons fn; }
+
+bash_lambda_defn() { declare name=$1; shift
+                     bash_lambda_fn_body "$@" | bash_lambda_cons -n $name; }
+
+# Exports functions into named files in the heap. This allows them to reference
+# each other from inside heap-allocated closures.
+bash_lambda_extern() { declare -f "$1" | grep '^  ' | bash_lambda_cons -n $1; }
+bash_lambda_def()    { rm -f $BASH_LAMBDA_HEAP/$1
+                       ln -s $2 $BASH_LAMBDA_HEAP/$1; }
+
+# Functional programming constructs
+# $(compose $f $g $h) x = f $(g $(h x))
+# $(partial $f x) y     = f x y
+bash_lambda_compose() {
+  declare body=
+  for (( i = $#; i >= 1; i -= 1 )); do
+    if (( $i == $# )); then body="\$(${!i} \"\$@\")";
+    else                    body="\$(${!i} $body)"; fi
+  done
+  bash_lambda_fn "echo $body"; }
+
+bash_lambda_partial() {
+  bash_lambda_fn "exec $* \"\$@\""; }
+
+# List programming constructs
+bash_lambda_list() { for x; do echo "$x"; done | bash_lambda_cons list; }
+bash_lambda_take() { cat ${2:--} | head -n$1; }
+bash_lambda_drop() { cat ${2:--} | (for (( i = 0; i < $1; i += 1 )); do
+                                      read x; done; cat -); }
+
+# Here, 'map' works as both map and mapcat since cons and append are the same
+# operation. This arises due to the associativity of cons.
+bash_lambda_map()    { cat ${2:--} | while read x; do $1 "$x"; done; }
+bash_lambda_reduce() { declare f="$1" x="$2"
+                       cat ${3:--} | (while read y; do x="$($f "$x" "$y")"; done
+                                      echo "$x"); }
+bash_lambda_filter() { cat ${2:--} | while read x; do
+                                       $1 "$x" && echo $x; done; }
+
+# List generators
+bash_lambda_iterate() { declare x="$2"
+                        echo "$x"; while x="$($1 $x)"; do echo "$x"; done; }
+
+bash_lambda_repeatedly() { declare f="$1" n="$2"
+                           for (( i = 0; i != ${n:--1}; i += 1 )); do
+                             $f; done; }
+
+# Export the bash_lambda library into the current heap
+declare -f | grep '^bash_lambda' | sed 's/ .*//' | while read fn; do
+  bash_lambda_extern $fn > /dev/null
+  if [[ -z "$BASH_LAMBDA_NO_ALIASES" ]]; then
+    bash_lambda_def ${fn##bash_lambda_} $fn
+  fi
+done
