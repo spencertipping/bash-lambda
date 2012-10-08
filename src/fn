@@ -1,0 +1,33 @@
+#!/bin/bash
+# Bash-lambda function and closure allocation
+
+bash_lambda_fn_body() {
+  echo '#!/bin/bash';
+  for (( i = 1; i <= $#; i += 1 )); do
+    if (( $i < $# )); then echo "declare -r ${!i}=\$$i"
+    else                   echo "${!i}"; fi
+  done; }
+
+bash_lambda_fn() {
+  # Yup, we're allocating closures by writing to files and returning their
+  # names to the callers. This gives you controllable persistence, heap
+  # allocation, and the ability to reference the same closures across multiple
+  # processes.
+  bash_lambda_fn_body "$@" | bash_lambda_cons fn; }
+
+bash_lambda_cons_fn() {
+  # Same as bash_lambda_fn, but body is specified from stdin. Useful for
+  # multiline functions when used with heredocs.
+  (bash_lambda_fn_body "$@" ''; cat -) | bash_lambda_cons fn; }
+
+bash_lambda_defn() { declare name=$1; shift
+                     bash_lambda_fn_body "$@" | bash_lambda_cons -n $name; }
+
+# Exports functions into named files in the heap. This allows them to reference
+# each other from inside heap-allocated closures. Any exported functions are
+# pinned so that they will never be garbage-collected.
+bash_lambda_extern() {
+  bash_lambda_gc_pin $(declare -f "$1" | grep '^  ' | bash_lambda_cons -n $1); }
+
+bash_lambda_def() { rm -f $BASH_LAMBDA_HEAP/$1
+                    ln -s $2 $(bash_lambda_gc_pin $BASH_LAMBDA_HEAP/$1); }

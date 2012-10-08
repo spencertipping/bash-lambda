@@ -1,0 +1,6 @@
+#!/bin/bash
+(cat src/header; for file in heap gc fn fp list map init; do
+  cat src/$file | grep -v '^#!'
+  echo
+done) > bash-lambda
+chmod +x bash-lambda

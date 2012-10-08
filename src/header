@@ -1,0 +1,7 @@
+#!/bin/bash
+# Bash-lambda
+
+# Source this file to create a function allocation space and enable first-class
+# functions in the shell. The heap will be deleted automatically when the shell
+# exits. See https://github.com/spencertipping/bash-lambda for documentation.
+

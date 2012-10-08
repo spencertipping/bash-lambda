@@ -1,0 +1,15 @@
+#!/bin/bash
+# Bash-lambda functional programming constructs
+
+# $(compose $f $g $h) x = f $(g $(h x))
+# $(partial $f x) y     = f x y
+bash_lambda_compose() {
+  declare body=
+  for (( i = $#; i >= 1; i -= 1 )); do
+    if (( $i == $# )); then body="\$(${!i} \"\$@\")";
+    else                    body="\$(${!i} $body)"; fi
+  done
+  bash_lambda_fn "echo $body"; }
+
+bash_lambda_partial() {
+  bash_lambda_fn "exec $* \"\$@\""; }

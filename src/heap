@@ -1,0 +1,38 @@
+#!/bin/bash
+# Bash-lambda disk-based heap
+
+# We need 128 bits of entropy for the heap directory name. This gives us
+# guarantees about the soundness of conservative garbage collection ... for the
+# rest of the story, see src/gc.
+
+# 128 bits total / 15 bits per random number = 9 numbers
+bash_lambda_genkey() { for (( i = 0; i < 9; i += 1 )); do
+                         printf '%04x' $RANDOM; done; }
+
+# Allow the user to override the heap location if they want to. However, this
+# may compromise the effectiveness of conservative GC.
+export BASH_LAMBDA_KEY=$(bash_lambda_genkey)
+export BASH_LAMBDA_HEAP=${BASH_LAMBDA_HEAP:-/tmp/blheap-$$-$BASH_LAMBDA_KEY}
+
+mkdir -p $BASH_LAMBDA_HEAP || return 1
+bash_lambda_nuke_heap() { rm -rf $BASH_LAMBDA_HEAP; }
+trap bash_lambda_nuke_heap EXIT
+export PATH="$PATH:$BASH_LAMBDA_HEAP"
+
+# Heap allocation
+bash_lambda_gensym() { echo "${1:-gensym}_$$_$(date +%s_%N)"; }
+
+bash_lambda_cons() {
+  declare file=$BASH_LAMBDA_HEAP/$(bash_lambda_gensym $1)
+  if [[ $1 == '-n' ]]; then file=$BASH_LAMBDA_HEAP/$2; fi
+
+  if [[ -d $BASH_LAMBDA_HEAP/.gc-marked-set ]]; then
+    # A garbage collection is in-progress, so mark the object to prevent it
+    # from being collected this time around.
+    touch $BASH_LAMBDA_HEAP/.gc-marked-set/$2
+  fi
+
+  cat - > $file &&      # Take everything from stdin
+    chmod u+x $file &&  # All conses are executable
+    echo $file          # Return the filename
+}

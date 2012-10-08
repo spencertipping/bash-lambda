@@ -1,0 +1,10 @@
+#!/bin/bash
+# Bash-lambda function exporting
+
+# Export the bash_lambda library into the current heap
+declare -f | grep '^bash_lambda' | sed 's/ .*//' | while read fn; do
+  bash_lambda_extern $fn > /dev/null
+  if [[ -z "$BASH_LAMBDA_NO_ALIASES" ]]; then
+    bash_lambda_def ${fn##bash_lambda_} $fn
+  fi
+done

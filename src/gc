@@ -1,0 +1,72 @@
+#!/bin/bash
+# Bash-lambda concurrent mark-sweep garbage collector
+
+mkdir -p $BASH_LAMBDA_HEAP/.gc-permanent
+
+# This function can be run asynchronously: bash_lambda_run_gc &. It knows which
+# heap to run on, and it echoes information about the number of objects and
+# bytes reclaimed.
+bash_lambda_run_gc() {
+  # Try to acquire the GC lock. If we can't, another GC is probably running; so
+  # we exit immediately since GC is (ideally) idempotent.
+  mkdir $BASH_LAMBDA_HEAP/.gc-marked-set || return 1
+
+  # We have the lock. At this point the heap allocator will mark any new
+  # objects that are created, so we can use the root set that exists right now
+  # and start marking objects referenced by that root set.
+  bash_lambda_refs_in "$(declare)" | while read ref; do
+    bash_lambda_gc_visit "$ref"; done
+
+  # Now nuke anything that isn't either marked or permanent.
+  declare reclaimed=() reclaimed_size=0
+  ls $BASH_LAMBDA_HEAP | while read ref; do
+    if [[ ! -e "$BASH_LAMBDA_HEAP/.gc-marked-set/${ref##*/}" &&
+          ! -e "$BASH_LAMBDA_HEAP/.gc-permanent/${ref##*/}" ]]; then
+      reclaimed[${#reclaimed[@]}]="$ref"
+      reclaimed_size=$((reclaimed_size + $(wc -c < "$ref")))
+      rm -rf "$ref"; fi; done
+
+  # We are now done. Remove the marked-set directory and echo some stats about
+  # the stuff we collected.
+  rm -rf $BASH_LAMBDA_HEAP/.gc-marked-set
+  echo "${#reclaimed[@]} $reclaimed_size"; }
+
+bash_lambda_gc_pin() {
+  # Pins an object so that it will never be collected.
+  touch $BASH_LAMBDA_HEAP/.gc-permanent/${1##*/};
+  echo "$1"; }
+
+bash_lambda_gc_visit() {
+  # The ref in question must be an object that exists in the heap. We expect it
+  # to be a full pathname, though the object itself should be a direct child of
+  # the heap directory.
+  declare ref="$1" ref_name="${ref#$BASH_LAMBDA_HEAP/}"
+
+  # No need to mark an object in a subdirectory. It isn't a direct child of the
+  # heap, so its storage is already being managed by the directory it belongs
+  # to.
+  if [[ ! "$ref_name" =~ / ]]; then
+    # Have we already visited this object? If so, no need to revisit it.
+    [[ -e $BASH_LAMBDA_HEAP/.gc-marked-set/$ref_name ]] && return 0
+
+    # Otherwise, mark the object and everything it points to.
+    touch $BASH_LAMBDA_HEAP/.gc-marked-set/${ref##*/}
+
+    if [[ -d "$ref" ]]; then
+      for child in $ref/*; do bash_lambda_gc_visit "$child"; done
+    else
+      # Search for GC refs in the child.
+      for child in $(bash_lambda_refs_in "$(<"$ref")"); do
+        bash_lambda_gc_visit "$child"; done; fi; fi; }
+
+bash_lambda_refs_in() {
+  # Locate occurrences of the heap directory. This name contains 128 bits of
+  # pseudorandom entropy, so we are unlikely to see it spuriously referenced.
+  # If we observe a path that exists, then we consider that to be a reference
+  # for GC purposes.
+
+  # This function is a total hack.
+  declare text="$1"
+  while [[ "$text" =~ ($BASH_LAMBDA_HEAP/[^ /\)\}\"]+)(.*) ]]; do
+    [[ -e "${BASH_REMATCH[1]}" ]] && echo "${BASH_REMATCH[1]}"
+    text="${BASH_REMATCH[2]}"; done; }

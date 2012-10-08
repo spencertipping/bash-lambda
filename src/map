@@ -1,0 +1,13 @@
+#!/bin/bash
+# Bash-lambda associative maps
+
+bash_lambda_hashmap() {
+  declare name=$BASH_LAMBDA_HEAP/$(bash_lambda_gensym hashmap)
+  mkdir $name && echo $name; }
+
+bash_lambda_assoc()  { echo "$3" > "$1/$2" && echo "$1"; }
+bash_lambda_dissoc() { rm -f "$1/$2";         echo "$1"; }
+bash_lambda_get()    { if [[ -e "$1/$2" ]]; then cat "$1/$2"
+                       else                      echo "$3"; fi; }
+
+bash_lambda_contains() { [[ -e "$1/$2" ]]; }
