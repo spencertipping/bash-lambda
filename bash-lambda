@@ -2,7 +2,7 @@
 # Source this file to create a function allocation space and enable first-class
 # functions in the shell.
 
-export BASH_LAMBDA_HEAP=${BASH_LAMBDA_HEAP:-/tmp/bash-lambda-heap-$$}
+export BASH_LAMBDA_HEAP=${BASH_LAMBDA_HEAP:-${TMPDIR:-/tmp}/bash-lambda-heap-$$}
 mkdir -p $BASH_LAMBDA_HEAP || return 1
 bash_lambda_nuke_heap() { rm -rf $BASH_LAMBDA_HEAP; }
 trap bash_lambda_nuke_heap EXIT
