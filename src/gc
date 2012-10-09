@@ -1,8 +1,10 @@
 #!/bin/bash
 # Bash-lambda concurrent mark-sweep garbage collector
 
-export BASH_LAMBDA_GC_SECONDS=30        # If 0, no automatic GC
-export BASH_LAMBDA_GC_CONCURRENT=1      # If 0, synchronous GC
+# BASH_LAMBDA_GC_SECONDS=0 will disable automatic GC
+# BASH_LAMBDA_GC_CONCURRENT=0 will cause GC to be synchronous
+export BASH_LAMBDA_GC_SECONDS=${BASH_LAMBDA_GC_SECONDS:-30}
+export BASH_LAMBDA_GC_CONCURRENT=${BASH_LAMBDA_GC_CONCURRENT:-1}
 
 mkdir -p $BASH_LAMBDA_HEAP/.gc-permanent
 

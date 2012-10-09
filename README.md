@@ -4,6 +4,30 @@ Real lambda support for bash (a functionally complete hack). Includes a set of
 functions for functional programming, list allocation and traversal, and
 concurrent mark/sweep garbage collection with weak reference support.
 
+## NOTE
+
+This library is experimental. Don't use it for mission-critical applications,
+important data storage, etc. It's obviously a huge hack and may malfunction to
+an arbitrary degree with little or no reason.
+
+However, if you find bugs, please do let me know. Especially if it does
+something like this:
+
+```
+$ map $(fn x ...) $(list ...)
+/tmp/blheap-xxxx-xxxxxxxxxxxxx/fn_xxxxx_xxxxxxxxx: no such file or directory
+$
+```
+
+Anytime you see this and you're not using weak references, it's a bug in the
+concurrent GC. You can change the garbage collector settings using two
+environment variables:
+
+```
+$ export BASH_LAMBDA_GC_CONCURRENT=0    # GC will run synchronously
+$ export BASH_LAMBDA_GC_SECONDS=0       # no automatic GC
+```
+
 ## Getting started
 
 Load the library into your shell (the `source` line can go into .bashrc):
