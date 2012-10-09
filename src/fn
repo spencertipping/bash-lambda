@@ -2,7 +2,8 @@
 # Bash-lambda function and closure allocation
 
 bash_lambda_fn_body() {
-  echo '#!/bin/bash';
+  echo '#!/bin/bash'
+  declare i
   for (( i = 1; i <= $#; i += 1 )); do
     if (( $i < $# )); then echo "declare -r ${!i}=\$$i"
     else                   echo "${!i}"; fi
@@ -27,7 +28,10 @@ bash_lambda_defn() { declare name=$1; shift
 # each other from inside heap-allocated closures. Any exported functions are
 # pinned so that they will never be garbage-collected.
 bash_lambda_extern() {
-  bash_lambda_gc_pin $(declare -f "$1" | grep '^  ' | bash_lambda_cons -n $1); }
+  bash_lambda_gc_pin $( (echo "$1_main() {"
+                         declare -f "$1" | grep '^  '
+                         echo "}"
+                         echo "$1_main \"\$@\"") | bash_lambda_cons -n $1); }
 
 bash_lambda_def() { rm -f $BASH_LAMBDA_HEAP/$1
                     ln -s $2 $(bash_lambda_gc_pin $BASH_LAMBDA_HEAP/$1); }

@@ -1,0 +1,8 @@
+#!/bin/bash
+# Bash-lambda weak references
+
+# A weak reference is a path that resolves the same way as a regular path, but
+# that isn't followed by the garbage collector. src/heap sets up a symlink for
+# this purpose.
+bash_lambda_weak_ref() {
+  echo "$BASH_LAMBDA_HEAP/.weak-references/${1##$BASH_LAMBDA_HEAP/}"; }

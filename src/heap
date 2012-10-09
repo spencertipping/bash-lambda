@@ -6,7 +6,8 @@
 # rest of the story, see src/gc.
 
 # 128 bits total / 15 bits per random number = 9 numbers
-bash_lambda_genkey() { for (( i = 0; i < 9; i += 1 )); do
+bash_lambda_genkey() { declare i
+                       for (( i = 0; i < 9; i += 1 )); do
                          printf '%04x' $RANDOM; done; }
 
 # Allow the user to override the heap location if they want to. However, this
@@ -15,6 +16,7 @@ export BASH_LAMBDA_KEY=$(bash_lambda_genkey)
 export BASH_LAMBDA_HEAP=${BASH_LAMBDA_HEAP:-/tmp/blheap-$$-$BASH_LAMBDA_KEY}
 
 mkdir -p $BASH_LAMBDA_HEAP || return 1
+ln -s $BASH_LAMBDA_HEAP $BASH_LAMBDA_HEAP/.weak-references
 bash_lambda_nuke_heap() { rm -rf $BASH_LAMBDA_HEAP; }
 trap bash_lambda_nuke_heap EXIT
 export PATH="$PATH:$BASH_LAMBDA_HEAP"
@@ -26,13 +28,12 @@ bash_lambda_cons() {
   declare file=$BASH_LAMBDA_HEAP/$(bash_lambda_gensym $1)
   if [[ $1 == '-n' ]]; then file=$BASH_LAMBDA_HEAP/$2; fi
 
-  if [[ -d $BASH_LAMBDA_HEAP/.gc-marked-set ]]; then
-    # A garbage collection is in-progress, so mark the object to prevent it
-    # from being collected this time around.
-    touch $BASH_LAMBDA_HEAP/.gc-marked-set/$2
-  fi
+  # If garbage collection is in-progress, mark the object to prevent it from
+  # being collected this time around. We don't mark it as having been visited,
+  # however; doing that would cause anything it makes live to be collected
+  # erroneously.
+  touch $BASH_LAMBDA_HEAP/.gc-marked-set/${file##*/} >& /dev/null
 
   cat - > $file &&      # Take everything from stdin
     chmod u+x $file &&  # All conses are executable
-    echo $file          # Return the filename
-}
+    echo $file; }

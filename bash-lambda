@@ -12,7 +12,8 @@
 # rest of the story, see src/gc.
 
 # 128 bits total / 15 bits per random number = 9 numbers
-bash_lambda_genkey() { for (( i = 0; i < 9; i += 1 )); do
+bash_lambda_genkey() { declare i
+                       for (( i = 0; i < 9; i += 1 )); do
                          printf '%04x' $RANDOM; done; }
 
 # Allow the user to override the heap location if they want to. However, this
@@ -21,6 +22,7 @@ export BASH_LAMBDA_KEY=$(bash_lambda_genkey)
 export BASH_LAMBDA_HEAP=${BASH_LAMBDA_HEAP:-/tmp/blheap-$$-$BASH_LAMBDA_KEY}
 
 mkdir -p $BASH_LAMBDA_HEAP || return 1
+ln -s $BASH_LAMBDA_HEAP $BASH_LAMBDA_HEAP/.weak-references
 bash_lambda_nuke_heap() { rm -rf $BASH_LAMBDA_HEAP; }
 trap bash_lambda_nuke_heap EXIT
 export PATH="$PATH:$BASH_LAMBDA_HEAP"
@@ -32,16 +34,15 @@ bash_lambda_cons() {
   declare file=$BASH_LAMBDA_HEAP/$(bash_lambda_gensym $1)
   if [[ $1 == '-n' ]]; then file=$BASH_LAMBDA_HEAP/$2; fi
 
-  if [[ -d $BASH_LAMBDA_HEAP/.gc-marked-set ]]; then
-    # A garbage collection is in-progress, so mark the object to prevent it
-    # from being collected this time around.
-    touch $BASH_LAMBDA_HEAP/.gc-marked-set/$2
-  fi
+  # If garbage collection is in-progress, mark the object to prevent it from
+  # being collected this time around. We don't mark it as having been visited,
+  # however; doing that would cause anything it makes live to be collected
+  # erroneously.
+  touch $BASH_LAMBDA_HEAP/.gc-marked-set/${file##*/} >& /dev/null
 
   cat - > $file &&      # Take everything from stdin
     chmod u+x $file &&  # All conses are executable
-    echo $file          # Return the filename
-}
+    echo $file; }
 
 # Bash-lambda concurrent mark-sweep garbage collector
 
@@ -50,30 +51,38 @@ mkdir -p $BASH_LAMBDA_HEAP/.gc-permanent
 # This function can be run asynchronously: bash_lambda_run_gc &. It knows which
 # heap to run on, and it echoes information about the number of objects and
 # bytes reclaimed.
-bash_lambda_run_gc() {
+bash_lambda_gc() {
   # Try to acquire the GC lock. If we can't, another GC is probably running; so
   # we exit immediately since GC is (ideally) idempotent.
-  mkdir $BASH_LAMBDA_HEAP/.gc-marked-set || return 1
+  mkdir $BASH_LAMBDA_HEAP/.gc-visited-set || return 1
+  mkdir -p $BASH_LAMBDA_HEAP/.gc-marked-set
 
   # We have the lock. At this point the heap allocator will mark any new
   # objects that are created, so we can use the root set that exists right now
   # and start marking objects referenced by that root set.
-  bash_lambda_refs_in "$(declare)" | while read ref; do
-    bash_lambda_gc_visit "$ref"; done
+  declare | bash_lambda_gc_refs | (declare ref; while read ref; do
+    bash_lambda_gc_visit "$ref"; done)
 
   # Now nuke anything that isn't either marked or permanent.
-  declare reclaimed=() reclaimed_size=0
-  ls $BASH_LAMBDA_HEAP | while read ref; do
-    if [[ ! -e "$BASH_LAMBDA_HEAP/.gc-marked-set/${ref##*/}" &&
-          ! -e "$BASH_LAMBDA_HEAP/.gc-permanent/${ref##*/}" ]]; then
-      reclaimed[${#reclaimed[@]}]="$ref"
-      reclaimed_size=$((reclaimed_size + $(wc -c < "$ref")))
-      rm -rf "$ref"; fi; done
+  ls -d $BASH_LAMBDA_HEAP/* | (
+    declare ref reclaimed=() reclaimed_size=0
+    while read ref; do
+      if [[ ! -e "$BASH_LAMBDA_HEAP/.gc-marked-set/${ref##*/}" &&
+            ! -e "$BASH_LAMBDA_HEAP/.gc-permanent/${ref##*/}" ]]; then
+        reclaimed[${#reclaimed[@]}]="$ref"
+        reclaimed_size=$((reclaimed_size + $(du -sb "$ref" | cut -f 1)))
+        rm -rf "$ref"; fi; done
+    echo "${#reclaimed[@]} $reclaimed_size")
 
   # We are now done. Remove the marked-set directory and echo some stats about
   # the stuff we collected.
-  rm -rf $BASH_LAMBDA_HEAP/.gc-marked-set
-  echo "${#reclaimed[@]} $reclaimed_size"; }
+  rm -rf $BASH_LAMBDA_HEAP/.gc-{marked,visited}-set; }
+
+bash_lambda_heap_stats() {
+  printf '%-20s %s\n%-20s %d\n%-20s %d\n' \
+    'heap size:' $(du -sh $BASH_LAMBDA_HEAP | cut -f 1) \
+    'objects:'   $(ls $BASH_LAMBDA_HEAP | wc -l) \
+    'permanent:' $(ls $BASH_LAMBDA_HEAP/.gc-permanent | wc -l); }
 
 bash_lambda_gc_pin() {
   # Pins an object so that it will never be collected.
@@ -84,41 +93,48 @@ bash_lambda_gc_visit() {
   # The ref in question must be an object that exists in the heap. We expect it
   # to be a full pathname, though the object itself should be a direct child of
   # the heap directory.
-  declare ref="$1" ref_name="${ref#$BASH_LAMBDA_HEAP/}"
+  declare child ref="$1" ref_name="${ref#$BASH_LAMBDA_HEAP/}"
 
   # No need to mark an object in a subdirectory. It isn't a direct child of the
   # heap, so its storage is already being managed by the directory it belongs
   # to.
-  if [[ ! "$ref_name" =~ / ]]; then
+  if [[ ! ("$ref_name" =~ /) ]]; then
     # Have we already visited this object? If so, no need to revisit it.
-    [[ -e $BASH_LAMBDA_HEAP/.gc-marked-set/$ref_name ]] && return 0
+    [[ -e $BASH_LAMBDA_HEAP/.gc-visited-set/$ref_name ]] && return 0
 
     # Otherwise, mark the object and everything it points to.
-    touch $BASH_LAMBDA_HEAP/.gc-marked-set/${ref##*/}
+    touch $BASH_LAMBDA_HEAP/.gc-{marked,visited}-set/$ref_name
+  fi
 
-    if [[ -d "$ref" ]]; then
-      for child in $ref/*; do bash_lambda_gc_visit "$child"; done
-    else
-      # Search for GC refs in the child.
-      for child in $(bash_lambda_refs_in "$(<"$ref")"); do
-        bash_lambda_gc_visit "$child"; done; fi; fi; }
+  if [[ -d "$ref" ]]; then
+    for child in $ref/*; do bash_lambda_gc_visit "$child"; done
+  else
+    # Search for GC refs in the child.
+    bash_lambda_gc_refs < "$ref" | (declare child; while read child; do
+      bash_lambda_gc_visit "$child"; done); fi; }
 
-bash_lambda_refs_in() {
+bash_lambda_gc_refs() {
   # Locate occurrences of the heap directory. This name contains 128 bits of
   # pseudorandom entropy, so we are unlikely to see it spuriously referenced.
   # If we observe a path that exists, then we consider that to be a reference
   # for GC purposes.
 
   # This function is a total hack.
-  declare text="$1"
-  while [[ "$text" =~ ($BASH_LAMBDA_HEAP/[^ /\)\}\"]+)(.*) ]]; do
-    [[ -e "${BASH_REMATCH[1]}" ]] && echo "${BASH_REMATCH[1]}"
-    text="${BASH_REMATCH[2]}"; done; }
+  egrep -o "$BASH_LAMBDA_HEAP/[^ /\)\}\"']+"; }
+
+# Bash-lambda weak references
+
+# A weak reference is a path that resolves the same way as a regular path, but
+# that isn't followed by the garbage collector. src/heap sets up a symlink for
+# this purpose.
+bash_lambda_weak_ref() {
+  echo "$BASH_LAMBDA_HEAP/.weak-references/${1##$BASH_LAMBDA_HEAP/}"; }
 
 # Bash-lambda function and closure allocation
 
 bash_lambda_fn_body() {
-  echo '#!/bin/bash';
+  echo '#!/bin/bash'
+  declare i
   for (( i = 1; i <= $#; i += 1 )); do
     if (( $i < $# )); then echo "declare -r ${!i}=\$$i"
     else                   echo "${!i}"; fi
@@ -143,7 +159,10 @@ bash_lambda_defn() { declare name=$1; shift
 # each other from inside heap-allocated closures. Any exported functions are
 # pinned so that they will never be garbage-collected.
 bash_lambda_extern() {
-  bash_lambda_gc_pin $(declare -f "$1" | grep '^  ' | bash_lambda_cons -n $1); }
+  bash_lambda_gc_pin $( (echo "$1_main() {"
+                         declare -f "$1" | grep '^  '
+                         echo "}"
+                         echo "$1_main \"\$@\"") | bash_lambda_cons -n $1); }
 
 bash_lambda_def() { rm -f $BASH_LAMBDA_HEAP/$1
                     ln -s $2 $(bash_lambda_gc_pin $BASH_LAMBDA_HEAP/$1); }
@@ -153,7 +172,7 @@ bash_lambda_def() { rm -f $BASH_LAMBDA_HEAP/$1
 # $(compose $f $g $h) x = f $(g $(h x))
 # $(partial $f x) y     = f x y
 bash_lambda_compose() {
-  declare body=
+  declare i body
   for (( i = $#; i >= 1; i -= 1 )); do
     if (( $i == $# )); then body="\$(${!i} \"\$@\")";
     else                    body="\$(${!i} $body)"; fi
@@ -165,25 +184,30 @@ bash_lambda_partial() {
 
 # Bash-lambda list programming constructs
 
-bash_lambda_list() { for x; do echo "$x"; done | bash_lambda_cons list; }
+bash_lambda_list() { declare x
+                     for x; do echo "$x"; done | bash_lambda_cons list; }
 bash_lambda_take() { cat ${2:--} | head -n$1; }
-bash_lambda_drop() { cat ${2:--} | (for (( i = 0; i < $1; i += 1 )); do
+bash_lambda_drop() { cat ${2:--} | (declare i
+                                    for (( i = 0; i < $1; i += 1 )); do
                                       read x; done; cat -); }
 
 # Here, 'map' works as both map and mapcat since cons and append are the same
 # operation. This arises due to the associativity of cons.
-bash_lambda_map()    { cat ${2:--} | while read x; do $1 "$x"; done; }
+bash_lambda_map()    { cat ${2:--} | (declare x
+                                      while read x; do $1 "$x"; done); }
 bash_lambda_reduce() { declare f="$1" x="$2"
-                       cat ${3:--} | (while read y; do x="$($f "$x" "$y")"; done
+                       cat ${3:--} | (declare y
+                                      while read y; do x="$($f "$x" "$y")"; done
                                       echo "$x"); }
-bash_lambda_filter() { cat ${2:--} | while read x; do
-                                       $1 "$x" && echo $x; done; }
+bash_lambda_filter() { cat ${2:--} | (declare x
+                                      while read x; do
+                                        $1 "$x" && echo $x; done); }
 
 # List generators
 bash_lambda_iterate() { declare x="$2"
                         echo "$x"; while x="$($1 $x)"; do echo "$x"; done; }
 
-bash_lambda_repeatedly() { declare f="$1" n="$2"
+bash_lambda_repeatedly() { declare i f="$1" n="$2"
                            for (( i = 0; i != ${n:--1}; i += 1 )); do
                              $f; done; }
 
@@ -203,10 +227,12 @@ bash_lambda_contains() { [[ -e "$1/$2" ]]; }
 # Bash-lambda function exporting
 
 # Export the bash_lambda library into the current heap
-declare -f | grep '^bash_lambda' | sed 's/ .*//' | while read fn; do
-  bash_lambda_extern $fn > /dev/null
-  if [[ -z "$BASH_LAMBDA_NO_ALIASES" ]]; then
-    bash_lambda_def ${fn##bash_lambda_} $fn
-  fi
-done
+bash_lambda_init() {
+  declare fn
+  declare -f | grep '^bash_lambda' | sed 's/ .*//' | while read fn; do
+    bash_lambda_extern $fn > /dev/null
+    if [[ -z "$BASH_LAMBDA_NO_ALIASES" ]]; then
+      bash_lambda_def ${fn##bash_lambda_} $fn; fi; done; }
+
+bash_lambda_init
 

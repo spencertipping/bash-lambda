@@ -4,7 +4,7 @@
 # $(compose $f $g $h) x = f $(g $(h x))
 # $(partial $f x) y     = f x y
 bash_lambda_compose() {
-  declare body=
+  declare i body
   for (( i = $#; i >= 1; i -= 1 )); do
     if (( $i == $# )); then body="\$(${!i} \"\$@\")";
     else                    body="\$(${!i} $body)"; fi

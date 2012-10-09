@@ -1,24 +1,29 @@
 #!/bin/bash
 # Bash-lambda list programming constructs
 
-bash_lambda_list() { for x; do echo "$x"; done | bash_lambda_cons list; }
+bash_lambda_list() { declare x
+                     for x; do echo "$x"; done | bash_lambda_cons list; }
 bash_lambda_take() { cat ${2:--} | head -n$1; }
-bash_lambda_drop() { cat ${2:--} | (for (( i = 0; i < $1; i += 1 )); do
+bash_lambda_drop() { cat ${2:--} | (declare i
+                                    for (( i = 0; i < $1; i += 1 )); do
                                       read x; done; cat -); }
 
 # Here, 'map' works as both map and mapcat since cons and append are the same
 # operation. This arises due to the associativity of cons.
-bash_lambda_map()    { cat ${2:--} | while read x; do $1 "$x"; done; }
+bash_lambda_map()    { cat ${2:--} | (declare x
+                                      while read x; do $1 "$x"; done); }
 bash_lambda_reduce() { declare f="$1" x="$2"
-                       cat ${3:--} | (while read y; do x="$($f "$x" "$y")"; done
+                       cat ${3:--} | (declare y
+                                      while read y; do x="$($f "$x" "$y")"; done
                                       echo "$x"); }
-bash_lambda_filter() { cat ${2:--} | while read x; do
-                                       $1 "$x" && echo $x; done; }
+bash_lambda_filter() { cat ${2:--} | (declare x
+                                      while read x; do
+                                        $1 "$x" && echo $x; done); }
 
 # List generators
 bash_lambda_iterate() { declare x="$2"
                         echo "$x"; while x="$($1 $x)"; do echo "$x"; done; }
 
-bash_lambda_repeatedly() { declare f="$1" n="$2"
+bash_lambda_repeatedly() { declare i f="$1" n="$2"
                            for (( i = 0; i != ${n:--1}; i += 1 )); do
                              $f; done; }
