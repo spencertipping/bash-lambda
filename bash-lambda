@@ -54,9 +54,9 @@ export BASH_LAMBDA_GC_CONCURRENT=${BASH_LAMBDA_GC_CONCURRENT:-1}
 
 mkdir -p $BASH_LAMBDA_HEAP/.gc-permanent
 
-# This function can be run asynchronously: bash_lambda_run_gc &. It knows which
-# heap to run on, and it echoes information about the number of objects and
-# bytes reclaimed.
+# This function can be run asynchronously: bash_lambda_gc &. See
+# bash_lambda_auto_gc for an example. It knows which heap to run on, and it
+# echoes information about the number of objects and bytes reclaimed.
 bash_lambda_gc() {
   # Here are the known cases where an object can be prematurely collected:
   #
@@ -241,17 +241,17 @@ bash_lambda_reduce() { declare f="$1" x="$2"
                        cat ${3:--} | (declare y
                                       while read y; do x="$($f "$x" "$y")"; done
                                       echo "$x"); }
-bash_lambda_filter() { cat ${2:--} | (declare x
-                                      while read x; do
-                                        $1 "$x" > /dev/null && echo $x; done); }
+bash_lambda_filter() { cat ${2:--} |
+                       (declare x; while read x; do
+                                     $1 "$x" > /dev/null && echo "$x"; done); }
 
 # List generators
 bash_lambda_iterate() { declare x="$2"
-                        echo "$x"; while x="$($1 $x)"; do echo "$x"; done; }
+                        echo "$x"; while x="$($1 "$x")"; do echo "$x"; done; }
 
 bash_lambda_repeatedly() { declare i f="$1" n="$2"
                            for (( i = 0; i != ${n:--1}; i += 1 )); do
-                             $f; done; }
+                             $f || return $?; done; }
 
 # Bash-lambda function exporting and GC hooks
 

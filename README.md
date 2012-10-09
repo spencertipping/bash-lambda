@@ -200,6 +200,30 @@ $ map $self_and_one_more $(list 1 2 3)
 $
 ```
 
+### Infinite lists
+
+UNIX has a long tradition of using pipes to form lazy computations, and
+bash-lambda is designed to do the same thing. You can generate infinite lists
+using `iterate` and `repeatedly`, each of which is roughly equivalent to the
+Clojure function of the same name:
+
+```
+$ repeatedly $rand_int 100      # notice count is after, not before, function
+<100 numbers>
+$ iterate $(partial $add 1) 0
+0
+1
+2
+3
+...
+$
+```
+
+Note that both `iterate` and `repeatedly` will continue forever, even if you
+use `take` (a wrapper for `head`) to select only a few lines. I'm not sure how
+to fix this at the moment, but I'd be very happy to accept a fix if anyone has
+one. (See `src/list` for these functions)
+
 ## Closures
 
 There are two ways you can allocate closures, one of which is true to the usual
@@ -256,6 +280,45 @@ $
 The two numbers are the number and size of reclaimed objects. If it says `0 0`,
 then no garbage was found.
 
+### Inspecting heap state
+
+You can see how much memory the heap is using by running `heap_stats`:
+
+```
+$ heap_stats
+heap size:           120K
+objects:             54
+permanent:           54
+$
+```
+
+You can also inspect the root set and find the references for any object:
+
+```
+$ gc_roots
+/tmp/blheap-xxxx-xxxxxxxxxxx/gc_roots
+/tmp/blheap-xxxx-xxxxxxxxxxx/gc_roots
+/tmp/blheap-xxxx-xxxxxxxxxxx/gc_roots
+$ add=$(fn x y 'echo $((x + y))')
+$ echo $add
+/tmp/blheap-xxxx-xxxxxxxxxxx/fn_xxxx_xxxxxxxxx
+$ cat $(partial $add 5) | gc_refs
+/tmp/blheap-xxxx-xxxxxxxxxxx/fn_xxxx_xxxxxxxxx
+$
+```
+
+The output of `gc_refs` includes weak references. You can detect weak or
+fictitious references by looking for slashes in whatever follows
+`$BASH_LAMBDA_HEAP/`:
+
+```
+$ is_real_ref=$(fn x '[[ ! ${x##$BASH_LAMBDA_HEAP/} =~ / ]]')
+$ $is_real_ref $is_real_ref || echo not real
+$ $is_real_ref $(weak_ref $is_real_ref) || echo not real
+not real
+$
+```
+
 ### Pinning objects
 
 The root set is built from all variables you have declared in your shell. This
@@ -307,7 +370,7 @@ no
 $
 ```
 
-### Known problems with concurrent GC
+### Limits of concurrent GC in bash
 
 Bash-lambda doesn't own its heap and memory space the same way that the JVM
 does. As a result, there are a few cases where GC will be inaccurate, causing
@@ -320,4 +383,6 @@ objects to be collected when they shouldn't. So far these cases are:
    `sleep 10; map $(fn ...) $xs`. We can't read the memory of the bash process,
    so we won't be able to know whether the `$(fn)` is still in the live set.
 
-See `src/gc` for a full discussion of these issues.
+Bash-lambda does its best to work around these problems, but there may still be
+edge cases. See `src/gc` for a full discussion of these issues, and please let
+me know if you run into bugs in the garbage collector.

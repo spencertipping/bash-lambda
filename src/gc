@@ -8,9 +8,9 @@ export BASH_LAMBDA_GC_CONCURRENT=${BASH_LAMBDA_GC_CONCURRENT:-1}
 
 mkdir -p $BASH_LAMBDA_HEAP/.gc-permanent
 
-# This function can be run asynchronously: bash_lambda_run_gc &. It knows which
-# heap to run on, and it echoes information about the number of objects and
-# bytes reclaimed.
+# This function can be run asynchronously: bash_lambda_gc &. See
+# bash_lambda_auto_gc for an example. It knows which heap to run on, and it
+# echoes information about the number of objects and bytes reclaimed.
 bash_lambda_gc() {
   # Here are the known cases where an object can be prematurely collected:
   #
