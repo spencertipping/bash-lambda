@@ -12,6 +12,9 @@ mkdir -p $BASH_LAMBDA_HEAP/.gc-permanent
 # bash_lambda_auto_gc for an example. It knows which heap to run on, and it
 # echoes information about the number of objects and bytes reclaimed.
 bash_lambda_gc() {
+  # Avert disaster: never GC a heap unless it is in /tmp.
+  [[ "${BASH_LAMBDA_HEAP:0:5}" == "/tmp/" ]] || return 2
+
   # Here are the known cases where an object can be prematurely collected:
   #
   # 1. Immediately after entering a command. At this point the command-line
