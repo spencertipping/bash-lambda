@@ -21,8 +21,12 @@ bash_lambda_genkey() { declare i
 export BASH_LAMBDA_KEY=$(bash_lambda_genkey)
 export BASH_LAMBDA_HEAP=${BASH_LAMBDA_HEAP:-/tmp/blheap-$$-$BASH_LAMBDA_KEY}
 
+# Set this to 0 to disable asynchronous garbage collection.
+export BASH_LAMBDA_GC_SECONDS=30
+
 mkdir -p $BASH_LAMBDA_HEAP || return 1
 ln -s $BASH_LAMBDA_HEAP $BASH_LAMBDA_HEAP/.weak-references
+date +%s > $BASH_LAMBDA_HEAP/.last-gc
 bash_lambda_nuke_heap() { rm -rf $BASH_LAMBDA_HEAP; }
 trap bash_lambda_nuke_heap EXIT
 export PATH="$PATH:$BASH_LAMBDA_HEAP"
@@ -33,6 +37,16 @@ bash_lambda_gensym() { echo "${1:-gensym}_$$_$(date +%s_%N)"; }
 bash_lambda_cons() {
   declare file=$BASH_LAMBDA_HEAP/$(bash_lambda_gensym $1)
   if [[ $1 == '-n' ]]; then file=$BASH_LAMBDA_HEAP/$2; fi
+
+  # Trigger a concurrent GC if it's been more than some number of seconds since
+  # the last one. This turns out to be one of the few constant-time ways we can
+  # do this safely.
+  if (( $BASH_LAMBDA_GC_SECONDS &&
+        $(date +%s) - $(<$BASH_LAMBDA_HEAP/.last-gc) >
+          $BASH_LAMBDA_GC_SECONDS )); then
+    date +%s > $BASH_LAMBDA_HEAP/.last-gc
+    bash_lambda_gc >> $BASH_LAMBDA_HEAP/.gc-log &
+  fi
 
   # If garbage collection is in-progress, mark the object to prevent it from
   # being collected this time around. We don't mark it as having been visited,
@@ -169,9 +183,9 @@ bash_lambda_def() { rm -f $BASH_LAMBDA_HEAP/$1
 
 # Bash-lambda functional programming constructs
 
-# $(compose $f $g $h) x = f $(g $(h x))
-# $(partial $f x) y     = f x y
-bash_lambda_compose() {
+# $(comp $f $g $h) x = f $(g $(h x))
+# $(partial $f x) y  = f x y
+bash_lambda_comp() {
   declare i body
   for (( i = $#; i >= 1; i -= 1 )); do
     if (( $i == $# )); then body="\$(${!i} \"\$@\")";
@@ -201,7 +215,7 @@ bash_lambda_reduce() { declare f="$1" x="$2"
                                       echo "$x"); }
 bash_lambda_filter() { cat ${2:--} | (declare x
                                       while read x; do
-                                        $1 "$x" && echo $x; done); }
+                                        $1 "$x" > /dev/null && echo $x; done); }
 
 # List generators
 bash_lambda_iterate() { declare x="$2"
@@ -210,19 +224,6 @@ bash_lambda_iterate() { declare x="$2"
 bash_lambda_repeatedly() { declare i f="$1" n="$2"
                            for (( i = 0; i != ${n:--1}; i += 1 )); do
                              $f; done; }
-
-# Bash-lambda associative maps
-
-bash_lambda_hashmap() {
-  declare name=$BASH_LAMBDA_HEAP/$(bash_lambda_gensym hashmap)
-  mkdir $name && echo $name; }
-
-bash_lambda_assoc()  { echo "$3" > "$1/$2" && echo "$1"; }
-bash_lambda_dissoc() { rm -f "$1/$2";         echo "$1"; }
-bash_lambda_get()    { if [[ -e "$1/$2" ]]; then cat "$1/$2"
-                       else                      echo "$3"; fi; }
-
-bash_lambda_contains() { [[ -e "$1/$2" ]]; }
 
 # Bash-lambda function exporting
 

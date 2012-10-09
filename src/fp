@@ -1,9 +1,9 @@
 #!/bin/bash
 # Bash-lambda functional programming constructs
 
-# $(compose $f $g $h) x = f $(g $(h x))
-# $(partial $f x) y     = f x y
-bash_lambda_compose() {
+# $(comp $f $g $h) x = f $(g $(h x))
+# $(partial $f x) y  = f x y
+bash_lambda_comp() {
   declare i body
   for (( i = $#; i >= 1; i -= 1 )); do
     if (( $i == $# )); then body="\$(${!i} \"\$@\")";

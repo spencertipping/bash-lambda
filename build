@@ -1,5 +1,5 @@
 #!/bin/bash
-(cat src/header; for file in heap gc ref fn fp list map init; do
+(cat src/header; for file in heap gc ref fn fp list init; do
   cat src/$file | grep -v '^#!'
   echo
 done) > bash-lambda
