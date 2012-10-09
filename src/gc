@@ -15,8 +15,29 @@ bash_lambda_gc() {
   # We have the lock. At this point the heap allocator will mark any new
   # objects that are created, so we can use the root set that exists right now
   # and start marking objects referenced by that root set.
-  declare | bash_lambda_gc_refs | (declare ref; while read ref; do
-    bash_lambda_gc_visit "$ref"; done)
+
+  # Before we do anything, however, we need to wait for a few seconds to make
+  # sure the system has a chance to stabilize. In particular, here are the
+  # known cases where an object can be prematurely collected:
+  #
+  # 1. Immediately after entering a command. At this point the command-line
+  #    will have been parsed and conses will be allocated, but the parent
+  #    process ID may not yet exist. This will prevent us from detecting
+  #    objects in the process table roots.
+  # 2. When it appears in a delayed command. For example:
+  #    $ sleep 5; map $(fn ...) $my_list
+  #    The $(fn) form is evaluated immediately but won't be visible in the root
+  #    set for another five seconds.
+  #
+  # The safest way to work around these problems is to stash values into
+  # variables. These will always be detected by the GC. You can also put them
+  # into environment variables visible to other processes, at which point the
+  # other processes will hold weak references to them.
+
+  sleep 10
+
+  (declare; ps ax) | bash_lambda_gc_refs |
+  (declare ref; while read ref; do bash_lambda_gc_visit "$ref"; done)
 
   # Now nuke anything that isn't either marked or permanent.
   ls -d $BASH_LAMBDA_HEAP/* | (
@@ -58,8 +79,7 @@ bash_lambda_gc_visit() {
     [[ -e $BASH_LAMBDA_HEAP/.gc-visited-set/$ref_name ]] && return 0
 
     # Otherwise, mark the object and everything it points to.
-    touch $BASH_LAMBDA_HEAP/.gc-{marked,visited}-set/$ref_name
-  fi
+    touch $BASH_LAMBDA_HEAP/.gc-{marked,visited}-set/$ref_name; fi
 
   if [[ -d "$ref" ]]; then
     for child in $ref/*; do bash_lambda_gc_visit "$child"; done
