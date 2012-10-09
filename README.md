@@ -216,9 +216,9 @@ $ cp $our_numbers the-list
 ## Garbage collection
 
 Bash-lambda implements a conservative concurrent mark-sweep garbage collector
-that runs in the background if an allocation is made more than 30 seconds since
-the last GC run. This prevents the disk from accumulating tons of unused files
-from anonymous functions, partials, compositions, etc.
+that runs automatically if an allocation is made more than 30 seconds since the
+last GC run. This prevents the disk from accumulating tons of unused files from
+anonymous functions, partials, compositions, etc.
 
 You can also trigger a synchronous GC by running the `bash_lambda_gc` function
 (just `gc` for short):
@@ -282,3 +282,18 @@ $ $exists $g
 no
 $
 ```
+
+### Known problems with concurrent GC
+
+Bash-lambda doesn't own its heap and memory space the same way that the JVM
+does. As a result, there are a few cases where GC will be inaccurate, causing
+objects to be collected when they shouldn't. So far these cases are:
+
+1. The window of time between parameter substitution and command invocation.
+   Allocations made by those parameter substitutions will be live but may be
+   collected anyway since they are not visible in the process table.
+2. By extension, any commands that have delayed parts:
+   `sleep 10; map $(fn ...) $xs`. We can't read the memory of the bash process,
+   so we won't be able to know whether the `$(fn)` is still in the live set.
+
+See `src/gc` for a full discussion of these issues.

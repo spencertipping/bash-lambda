@@ -1,12 +1,15 @@
 #!/bin/bash
-# Bash-lambda function exporting
+# Bash-lambda function exporting and GC hooks
 
 # Export the bash_lambda library into the current heap
 bash_lambda_init() {
-  declare fn
-  declare -f | grep '^bash_lambda' | sed 's/ .*//' | while read fn; do
+  declare -f | grep '^bash_lambda' | sed 's/ .*//' |
+  (declare fn; while read fn; do
     bash_lambda_extern $fn > /dev/null
     if [[ -z "$BASH_LAMBDA_NO_ALIASES" ]]; then
-      bash_lambda_def ${fn##bash_lambda_} $fn; fi; done; }
+      bash_lambda_def ${fn##bash_lambda_} $fn; fi; done); }
 
 bash_lambda_init
+
+# Run a GC, if necessary, after each command
+export PROMPT_COMMAND="bash_lambda_auto_gc; $PROMPT_COMMAND"

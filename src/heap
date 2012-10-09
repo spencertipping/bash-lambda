@@ -15,9 +15,6 @@ bash_lambda_genkey() { declare i
 export BASH_LAMBDA_KEY=$(bash_lambda_genkey)
 export BASH_LAMBDA_HEAP=${BASH_LAMBDA_HEAP:-/tmp/blheap-$$-$BASH_LAMBDA_KEY}
 
-# Set this to 0 to disable asynchronous garbage collection.
-export BASH_LAMBDA_GC_SECONDS=30
-
 mkdir -p $BASH_LAMBDA_HEAP || return 1
 ln -s $BASH_LAMBDA_HEAP $BASH_LAMBDA_HEAP/.weak-references
 date +%s > $BASH_LAMBDA_HEAP/.last-gc
@@ -31,16 +28,6 @@ bash_lambda_gensym() { echo "${1:-gensym}_$$_$(date +%s_%N)"; }
 bash_lambda_cons() {
   declare file=$BASH_LAMBDA_HEAP/$(bash_lambda_gensym $1)
   if [[ $1 == '-n' ]]; then file=$BASH_LAMBDA_HEAP/$2; fi
-
-  # Trigger a concurrent GC if it's been more than some number of seconds since
-  # the last one. This turns out to be one of the few constant-time ways we can
-  # do this safely.
-  if (( $BASH_LAMBDA_GC_SECONDS &&
-        $(date +%s) - $(<$BASH_LAMBDA_HEAP/.last-gc) >
-          $BASH_LAMBDA_GC_SECONDS )); then
-    date +%s > $BASH_LAMBDA_HEAP/.last-gc
-    bash_lambda_gc >> $BASH_LAMBDA_HEAP/.gc-log &
-  fi
 
   # If garbage collection is in-progress, mark the object to prevent it from
   # being collected this time around. We don't mark it as having been visited,

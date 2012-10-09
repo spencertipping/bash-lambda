@@ -1,24 +1,16 @@
 #!/bin/bash
 # Bash-lambda concurrent mark-sweep garbage collector
 
+export BASH_LAMBDA_GC_SECONDS=30        # If 0, no automatic GC
+export BASH_LAMBDA_GC_CONCURRENT=1      # If 0, synchronous GC
+
 mkdir -p $BASH_LAMBDA_HEAP/.gc-permanent
 
 # This function can be run asynchronously: bash_lambda_run_gc &. It knows which
 # heap to run on, and it echoes information about the number of objects and
 # bytes reclaimed.
 bash_lambda_gc() {
-  # Try to acquire the GC lock. If we can't, another GC is probably running; so
-  # we exit immediately since GC is (ideally) idempotent.
-  mkdir $BASH_LAMBDA_HEAP/.gc-visited-set || return 1
-  mkdir -p $BASH_LAMBDA_HEAP/.gc-marked-set
-
-  # We have the lock. At this point the heap allocator will mark any new
-  # objects that are created, so we can use the root set that exists right now
-  # and start marking objects referenced by that root set.
-
-  # Before we do anything, however, we need to wait for a few seconds to make
-  # sure the system has a chance to stabilize. In particular, here are the
-  # known cases where an object can be prematurely collected:
+  # Here are the known cases where an object can be prematurely collected:
   #
   # 1. Immediately after entering a command. At this point the command-line
   #    will have been parsed and conses will be allocated, but the parent
@@ -29,14 +21,20 @@ bash_lambda_gc() {
   #    The $(fn) form is evaluated immediately but won't be visible in the root
   #    set for another five seconds.
   #
-  # The safest way to work around these problems is to stash values into
-  # variables. These will always be detected by the GC. You can also put them
-  # into environment variables visible to other processes, at which point the
-  # other processes will hold weak references to them.
+  # To guard against this, we should only run the collector when (1) the user
+  # is at a prompt and any foreground job has completed, and (2) there are no
+  # background jobs.
+  [[ -z "$(jobs)" ]] || return 1
 
-  sleep 10
+  # Try to acquire the GC lock. If we can't, another GC is probably running; so
+  # we exit immediately since GC is (ideally) idempotent.
+  mkdir $BASH_LAMBDA_HEAP/.gc-visited-set || return 1
+  mkdir -p $BASH_LAMBDA_HEAP/.gc-marked-set
 
-  (declare; ps ax) | bash_lambda_gc_refs |
+  # We have the lock. At this point the heap allocator will mark any new
+  # objects that are created, so we can use the root set that exists right now
+  # and start marking objects referenced by that root set.
+  bash_lambda_gc_roots |
   (declare ref; while read ref; do bash_lambda_gc_visit "$ref"; done)
 
   # Now nuke anything that isn't either marked or permanent.
@@ -53,6 +51,26 @@ bash_lambda_gc() {
   # We are now done. Remove the marked-set directory and echo some stats about
   # the stuff we collected.
   rm -rf $BASH_LAMBDA_HEAP/.gc-{marked,visited}-set; }
+
+bash_lambda_auto_gc() {
+  # Trigger a concurrent GC if it's been more than some number of seconds since
+  # the last one. This turns out to be one of the few constant-time ways we can
+  # do this safely.
+  if (( $BASH_LAMBDA_GC_SECONDS &&
+        $(date +%s) - $(<$BASH_LAMBDA_HEAP/.last-gc) >
+          $BASH_LAMBDA_GC_SECONDS )); then
+    date +%s > $BASH_LAMBDA_HEAP/.last-gc
+
+    # NOTE: Running GC concurrently is experimental and is known to have some
+    # problems unless done carefully. See comments in bash_lambda_gc for
+    # details.
+    if (( $BASH_LAMBDA_GC_CONCURRENT )); then
+      (bash_lambda_gc --concurrent >> $BASH_LAMBDA_HEAP/.gc-log &)
+    else
+      bash_lambda_gc >> $BASH_LAMBDA_HEAP/.gc-log
+    fi; fi; }
+
+bash_lambda_gc_roots() { (declare; ps ax) | bash_lambda_gc_refs; }
 
 bash_lambda_heap_stats() {
   printf '%-20s %s\n%-20s %d\n%-20s %d\n' \
@@ -95,4 +113,5 @@ bash_lambda_gc_refs() {
   # for GC purposes.
 
   # This function is a total hack.
-  egrep -o "$BASH_LAMBDA_HEAP/[^ /\)\}\"']+"; }
+  egrep -o "$BASH_LAMBDA_HEAP/[^ /\)\}\"']+" | (declare ref; while read ref; do
+    [[ -e "$ref" ]] && echo "$ref"; done); }
