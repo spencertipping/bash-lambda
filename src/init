@@ -12,4 +12,4 @@ bash_lambda_init() {
 bash_lambda_init
 
 # Run a GC, if necessary, after each command
-export PROMPT_COMMAND="bash_lambda_auto_gc; $PROMPT_COMMAND"
+export PROMPT_COMMAND="$PROMPT_COMMAND; bash_lambda_auto_gc"
