@@ -6,27 +6,12 @@ concurrent mark/sweep garbage collection with weak reference support.
 
 ## NOTE
 
-This library is experimental. Don't use it for mission-critical applications,
-important data storage, etc. It's obviously a huge hack and may malfunction to
-an arbitrary degree with little or no reason.
-
-However, if you find bugs, please do let me know. Especially if it does
-something like this:
-
-```
-$ map $(fn x ...) $(list ...)
-/tmp/blheap-xxxx-xxxxxxxxxxxxx/fn_xxxxx_xxxxxxxxx: no such file or directory
-$
-```
-
-Anytime you see this and you're not using weak references, it's a bug in the
-concurrent GC. You can change the garbage collector settings using two
-environment variables:
-
-```
-$ export BASH_LAMBDA_GC_CONCURRENT=0    # GC will run synchronously
-$ export BASH_LAMBDA_GC_SECONDS=0       # no automatic GC
-```
+*This library is experimental.* Don't use it for mission-critical applications,
+important data storage, etc. It's obviously a huge hack and may malfunction in
+any number of awkward ways. None of these should impact the integrity of the
+rest of your data (I source this library in my `.bashrc` and nothing bad has
+happened yet), but it probably wouldn't hurt to glance over the source code
+before using it, just in case.
 
 ## Getting started
 
