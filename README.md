@@ -21,6 +21,17 @@ $ git clone git://github.com/spencertipping/bash-lambda
 $ source bash-lambda/bash-lambda
 ```
 
+## Motivational examples
+
+### Find broken symlinks
+
+```
+$ broken_symlink=$(fn f '[[ ! -e "$f" ]]')
+$ ls -d /etc/* | filter $broken_symlink
+/etc/blkid.tab
+$
+```
+
 ## Defining functions
 
 The functions provided by bash-lambda take their nomenclature from Clojure, and
@@ -208,6 +219,29 @@ Note that both `iterate` and `repeatedly` will continue forever, even if you
 use `take` (a wrapper for `head`) to select only a few lines. I'm not sure how
 to fix this at the moment, but I'd be very happy to accept a fix if anyone has
 one. (See `src/list` for these functions)
+
+### Searching lists
+
+Bash-lambda provides `some` and `every` to find list values. These behave like
+Clojure's `some` and `every`, but each one returns the element it used to
+terminate the loop, if any.
+
+```
+$ ls /bin/* | some $(fn '[[ -x $1 ]]')
+/bin/bash
+$ echo $?
+0
+$ ls /etc/* | every $(fn '[[ -d $1 ]]')
+/etc/adduser.conf
+$ echo $?
+1
+$
+```
+
+If `some` or `every` reaches the end of the list, then it outputs nothing and
+its only result is its status code. (For `some`, it means nothing was found, so
+it returns 1; for `every`, it means they all satisfied the predicate, so it
+returns 0.)
 
 ## Closures
 

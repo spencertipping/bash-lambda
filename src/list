@@ -27,3 +27,16 @@ bash_lambda_iterate() { declare x="$2"
 bash_lambda_repeatedly() { declare i f="$1" n="$2"
                            for (( i = 0; i != ${n:--1}; i += 1 )); do
                              $f || return $?; done; }
+
+# Tests over lists
+bash_lambda_some() { cat ${2:--} |
+                     (declare x; while read x; do
+                       if $1 "$x" > /dev/null; then
+                         echo "$x"; return 0; fi; done
+                      return 1); }
+
+bash_lambda_every() { cat ${2:--} |
+                      (declare x; while read x; do
+                        if ! $1 "$x" > /dev/null; then
+                          echo "$x"; return 1; fi; done
+                       return 0); }
