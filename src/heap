@@ -15,10 +15,11 @@ bash_lambda_genkey() { declare i
 export BASH_LAMBDA_KEY=$(bash_lambda_genkey)
 export BASH_LAMBDA_HEAP=${BASH_LAMBDA_HEAP:-/tmp/blheap-$$-$BASH_LAMBDA_KEY}
 
-mkdir -p $BASH_LAMBDA_HEAP || return 1
-ln -s $BASH_LAMBDA_HEAP $BASH_LAMBDA_HEAP/.weak-references
-date +%s > $BASH_LAMBDA_HEAP/.last-gc
-bash_lambda_nuke_heap() { rm -rf $BASH_LAMBDA_HEAP; }
+mkdir -p "$BASH_LAMBDA_HEAP" || return 1
+ln -s "$BASH_LAMBDA_HEAP" "$BASH_LAMBDA_HEAP/.weak-references"
+date +%s > "$BASH_LAMBDA_HEAP/.last-gc"
+bash_lambda_nuke_heap() { [[ "${BASH_LAMBDA_HEAP:0:5}" == "/tmp/" ]] &&
+                          rm -rf "$BASH_LAMBDA_HEAP"; }
 trap bash_lambda_nuke_heap EXIT
 export PATH="$PATH:$BASH_LAMBDA_HEAP"
 
@@ -26,14 +27,14 @@ export PATH="$PATH:$BASH_LAMBDA_HEAP"
 bash_lambda_gensym() { echo "${1:-gensym}_$$_$(date +%s_%N)"; }
 
 bash_lambda_cons() {
-  declare file=$BASH_LAMBDA_HEAP/$(bash_lambda_gensym $1)
+  declare file="$BASH_LAMBDA_HEAP/$(bash_lambda_gensym $1)"
   if [[ $1 == '-n' ]]; then file=$BASH_LAMBDA_HEAP/$2; fi
 
   # If garbage collection is in-progress, mark the object to prevent it from
   # being collected this time around. We don't mark it as having been visited,
   # however; doing that would cause anything it makes live to be collected
   # erroneously.
-  touch $BASH_LAMBDA_HEAP/.gc-marked-set/${file##*/} >& /dev/null
+  touch "$BASH_LAMBDA_HEAP/.gc-marked-set/${file##*/}" >& /dev/null
 
   cat - > $file &&      # Take everything from stdin
     chmod u+x $file &&  # All conses are executable
