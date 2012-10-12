@@ -302,7 +302,7 @@ $
 You can also inspect the root set and find the references for any object:
 
 ```
-$ gc_roots
+$ gc_roots | gc_refs
 /tmp/blheap-xxxx-xxxxxxxxxxx/gc_roots
 /tmp/blheap-xxxx-xxxxxxxxxxx/gc_roots
 /tmp/blheap-xxxx-xxxxxxxxxxx/gc_roots
