@@ -8,7 +8,7 @@ bash_lambda_weak_ref() {
   echo "$BASH_LAMBDA_HEAP/.weak-references/${1##$BASH_LAMBDA_HEAP/}"; }
 
 bash_lambda_ref_snapshot() {
-  tar -czP $(bash_lambda_ref_closure "$1") | bash_lambda_cons shapshot; }
+  tar -czP $(bash_lambda_ref_closure "$1") | bash_lambda_cons snapshot; }
 
 bash_lambda_ref_intern() { cat ${1:--} | tar -xzP; }
 

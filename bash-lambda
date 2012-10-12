@@ -63,7 +63,7 @@ bash_lambda_weak_ref() {
   echo "$BASH_LAMBDA_HEAP/.weak-references/${1##$BASH_LAMBDA_HEAP/}"; }
 
 bash_lambda_ref_snapshot() {
-  tar -czP $(bash_lambda_ref_closure "$1") | bash_lambda_cons shapshot; }
+  tar -czP $(bash_lambda_ref_closure "$1") | bash_lambda_cons snapshot; }
 
 bash_lambda_ref_intern() { cat ${1:--} | tar -xzP; }
 
@@ -367,7 +367,7 @@ bash_lambda_future() {
   ("$@" > $output; echo $? > $exit_code; echo > $fifo; rm $fifo) >& /dev/null &
   printf $"%s\n%s\n%s" $output $exit_code $fifo | bash_lambda_cons future; }
 
-bash_lambda_future_complete() {
+bash_lambda_future_finished() {
   # Exits with 0 if the future is finished, 1 if still running. If 0, a
   # future_get call will block only on IO, but not on job completion.
   [[ -s "$(bash_lambda_nth 1 "$1")" ]]; }
@@ -376,7 +376,7 @@ bash_lambda_future_get() {
   # This function blocks on the future's process if it is still running, and
   # its stdout and exit code are proxied.
 
-  bash_lambda_future_complete "$1" ||
+  bash_lambda_future_finished "$1" ||
     cat "$(bash_lambda_nth 2 "$1")" >& /dev/null
   cat "$(bash_lambda_nth 0 "$1")"
   return "$(< "$(bash_lambda_nth 1 "$1")")"; }
@@ -387,8 +387,9 @@ bash_lambda_future_transpose() {
   bash_lambda_future $(bash_lambda_partial \
     bash_lambda_map bash_lambda_future_get $filename); }
 
-bash_lambda_defmulti complete > /dev/null
-bash_lambda_defmulti get      > /dev/null
+bash_lambda_defmulti finished  > /dev/null
+bash_lambda_defmulti get       > /dev/null
+bash_lambda_defmulti transpose > /dev/null
 
 # Bash-lambda function exporting and GC hooks
 

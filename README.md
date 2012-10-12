@@ -368,7 +368,7 @@ $ f=$(fn x 'echo $((x + 1))')
 $ g=$(comp $f $f)
 $ h=$(comp $g $f)
 $ ref_snapshot $h
-/tmp/blheap-12328-29f272454ea973c4561b2d1238957b7d0b2c/shapshot_u2C3u3QXO3cRpQ
+/tmp/blheap-12328-29f272454ea973c4561b2d1238957b7d0b2c/snapshot_u2C3u3QXO3cRpQ
 $ tar -tvf $(ref_snapshot $h)
 -rwx------ spencertipping/spencertipping 44 2012-10-11 23:01 /tmp/blheap-12328-29f272454ea973c4561b2d1238957b7d0b2c/fn_mm7fTv75AQZ4lf
 -rwx------ spencertipping/spencertipping 174 2012-10-11 23:01 /tmp/blheap-12328-29f272454ea973c4561b2d1238957b7d0b2c/fn_oiKxIgZQwPnmTD
