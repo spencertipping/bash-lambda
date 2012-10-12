@@ -1,15 +1,14 @@
 #!/bin/bash
 # Bash-lambda futures (asynchronous processes)
 
-# Futures are files consisting of three lines:
-# 1. The filename of the output collector
-# 2. The filename of the exit code collector
-# 3. The filename of the named pipe that will be closed upon completion
+# Future locking
+# It is surprisingly difficult to reliably wait for a future. We can't use the
+# 'wait' command because the future could belong to another subshell. We can't
+# use the process table or /proc because PIDs get reused. This leaves us with
+# two options: we can use polling against some lock file, or we can devise some
+# scheme with pipelocks.
 #
-# We can't use PID-based locking (e.g. via 'wait') because the future might
-# belong to a subshell. To fix this, we need to instead allocate a FIFO that
-# listeners can read against, and that the background job will close once it is
-# finished.
+# It turns out that we can use a semaphore to do everything we need.
 
 bash_lambda_future() {
   # Construct a future around the given function application. To do this, we
@@ -17,25 +16,40 @@ bash_lambda_future() {
   # We also record its exit code.
 
   declare output=$(bash_lambda_cons future_output < /dev/null)
-  declare exit_code=$(bash_lambda_cons future_status < /dev/null)
-  declare fifo=$(bash_lambda_cons future_fifo < /dev/null)
+  declare status=$(bash_lambda_cons future_status < /dev/null)
+  declare state=$(bash_lambda_atom running)
+  declare result=$(printf $"%s\n%s\n%s\n" $output $status $state | \
+                   bash_lambda_cons future)
 
-  rm $fifo && mkfifo $fifo
-
-  ("$@" > $output; echo $? > $exit_code; echo > $fifo; rm $fifo) >& /dev/null &
-  printf $"%s\n%s\n%s" $output $exit_code $fifo | bash_lambda_cons future; }
+  ("$@" > $output; echo $? > $status; notify $result) >& /dev/null &
+  echo $result; }
 
 bash_lambda_future_finished() {
   # Exits with 0 if the future is finished, 1 if still running. If 0, a
-  # future_get call will block only on IO, but not on job completion.
-  [[ -s "$(bash_lambda_nth 1 "$1")" ]]; }
+  # future_get call will block only on IO, but not on job completion. This
+  # operation can use unsafe_get because futures never un-finish.
+  [[ "$(bash_lambda_atom_unsafe_get "$(bash_lambda_nth 2 $1)")" == done ]]; }
+
+bash_lambda_future_state() {
+  bash_lambda_spin_wrap $(bash_lambda_nth 2 $1) cat; }
+
+bash_lambda_future_block() {
+  # Block on completion of the future. Spin-locks against the future's state.
+  declare pipelock=$(bash_lambda_spin_wrap $(bash_lambda_nth 2 $1) \
+    $(fn x "[[ \"\$(<\$x)\" == done ]] || bash_lambda_pipelock | tee -a \$x"))
+  [[ -z "$pipelock" ]] || bash_lambda_pipelock_grab $pipelock; }
+
+bash_lambda_future_notify() {
+  # Notify all listeners that this future is done. This amounts to unblocking
+  # all of the pipelocks that have been appended to the state.
+  bash_lambda_spin_wrap $(bash_lambda_nth 2 $1) \
+    $(fn x '[[ "$(<$x)" == done ]] || drop 1 $x | bash_lambda_map release
+            echo done > $x'); }
 
 bash_lambda_future_get() {
   # This function blocks on the future's process if it is still running, and
   # its stdout and exit code are proxied.
-
-  bash_lambda_future_finished "$1" ||
-    cat "$(bash_lambda_nth 2 "$1")" >& /dev/null
+  bash_lambda_future_finished "$1" || bash_lambda_future_block "$1"
   cat "$(bash_lambda_nth 0 "$1")"
   return "$(< "$(bash_lambda_nth 1 "$1")")"; }
 

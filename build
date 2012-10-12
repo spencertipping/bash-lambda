@@ -1,7 +1,7 @@
 #!/bin/bash
 (cat src/header
- for file in heap ref gc fn fp \
-             semaphore multi \
+ for file in heap ref gc fn fp multi \
+             pipelock semaphore atom \
              list \
              future remote wait parallel init; do
   cat src/$file | grep -v '^#!'

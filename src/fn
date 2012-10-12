@@ -22,7 +22,8 @@ bash_lambda_cons_fn() {
   (bash_lambda_fn_body "$@" ''; cat -) | bash_lambda_cons fn; }
 
 bash_lambda_defn() { declare name=$1; shift
-                     bash_lambda_fn_body "$@" | bash_lambda_cons -n $name; }
+                     bash_lambda_gc_pin \
+                      $(bash_lambda_fn_body "$@" | bash_lambda_cons -n $name); }
 
 # Exports functions into named files in the heap. This allows them to reference
 # each other from inside heap-allocated closures. Any exported functions are

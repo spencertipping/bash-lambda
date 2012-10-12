@@ -1,0 +1,39 @@
+#!/bin/bash
+# Bash-lambda atomic values
+
+# An atomic value supports thread-safe assignment and access. It does this by
+# guarding every read and write with a semaphore. You can also request a
+# transaction against the current value of an atomic value, so that during that
+# transaction any requests to change the value will block or fail.
+
+bash_lambda_atom() {
+  printf "%s\n%s" "$(bash_lambda_mutex)" \
+                  "$(echo "$1" | bash_lambda_cons)" | bash_lambda_cons atom; }
+
+bash_lambda_atom_grab() {
+  bash_lambda_mutex_grab "$(bash_lambda_nth 0 "$1")"; }
+
+bash_lambda_atom_release() { bash_lambda_mutex_release "$1"; }
+bash_lambda_atom_get()     { $(bash_lambda_atom_wrap "$1" cat); }
+
+# Unsafe-get is considerably faster than get, but does not respect the
+# atomicity of running transactions. Use this only when you have a single state
+# transition acting on the atom. (See src/future for an example)
+bash_lambda_atom_unsafe_get() { cat "$(bash_lambda_nth 1 "$1")"; }
+
+bash_lambda_atom_wrap() {
+  # A generalized transaction/set function. $(wrap $atom $f) does one of two
+  # things. If it acquires the atom's lock, then it invokes $f on a file
+  # containing the atom's current value. $f is free to modify the contents of
+  # this file.
+
+  # You will probably want to use one of the functions in src/wait instead of
+  # calling wrap directly.
+
+  declare atom=$1 f=$2
+  bash_lambda_fn "declare lock
+                  if lock=\$(bash_lambda_atom_grab $atom); then
+                    $f \"\$(bash_lambda_nth 1 $atom)\"
+                    declare status=\$?
+                    bash_lambda_atom_release \$lock
+                    exit \$status; fi"; }

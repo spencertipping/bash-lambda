@@ -22,12 +22,16 @@ bash_lambda_defmulti() {
   bash_lambda_defn $1 '$(bash_lambda_ref_type $1)_'$multi_name' "$@"'; }
 
 # Multimethod definitions for bash-lambda functions
-# get finished  src/future
-# count         src/list src/semaphore
-# wrap          src/semaphore
+# state finished block notify  src/future
+# get                          src/future src/atom
+# unsafe_get                   src/atom
+# count                        src/list src/semaphore
+# grab release wrap            src/semaphore src/atom src/pipelock
 
 (declare method
- for method in get finished \
+ for method in state finished block notify \
+               get \
+               unsafe_get \
                count \
-               wrap; do
+               grab release wrap; do
    bash_lambda_defmulti $method; done) > /dev/null

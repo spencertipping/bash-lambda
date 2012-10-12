@@ -241,7 +241,8 @@ bash_lambda_cons_fn() {
   (bash_lambda_fn_body "$@" ''; cat -) | bash_lambda_cons fn; }
 
 bash_lambda_defn() { declare name=$1; shift
-                     bash_lambda_fn_body "$@" | bash_lambda_cons -n $name; }
+                     bash_lambda_gc_pin \
+                      $(bash_lambda_fn_body "$@" | bash_lambda_cons -n $name); }
 
 # Exports functions into named files in the heap. This allows them to reference
 # each other from inside heap-allocated closures. Any exported functions are
@@ -270,47 +271,6 @@ bash_lambda_comp() {
 bash_lambda_partial() {
   bash_lambda_fn "$* \"\$@\""; }
 
-# Bash-lambda semaphores
-
-# Semaphores are directories that contain empty numbered subdirectories along
-# with an immutable file containing the capacity of the semaphore. Locking is
-# done by attempting to create one of these empty subdirectories, and ls -d |
-# wc -l is used to get the number of used entries.
-
-bash_lambda_semaphore() {
-  declare capacity=$1 semaphore=$(bash_lambda_dir semaphore)
-  echo $capacity > "$semaphore/capacity"
-  echo "$semaphore"; }
-
-bash_lambda_semaphore_take() {
-  # Take an item from the semaphore; returns the item's identifier (a path, but
-  # you don't need to know this) and exit code 0 if successful, returns 1 and
-  # outputs nothing if unsuccessful.
-  declare semaphore=$1 i
-  for (( i = 0; i < $(<"$semaphore/capacity"); i += 1 )); do
-    if mkdir "$semaphore/$i" >& /dev/null; then
-      echo "$semaphore/$i"; return 0; fi; done
-  return 1; }
-
-bash_lambda_semaphore_release() {
-  # Releases an item from the semaphore. You can just pass the item here; no
-  # need to pass the semaphore also.
-  rmdir "$1"; }
-
-bash_lambda_semaphore_count() {
-  # Counts the number of items available in the semaphore.
-  declare semaphore=$1
-  echo $(( $(<"$semaphore/capacity") + 1 - $(ls -d "$semaphore/"* | wc -l) )); }
-
-bash_lambda_semaphore_wrap() {
-  # Wraps a function's execution with a take/release of a semaphore item.
-  declare s=$1 f=$2
-  bash_lambda_fn "declare lock=\$(bash_lambda_semaphore_take $s) &&
-                  ($f \"\$@\"
-                   declare status=\$?
-                   bash_lambda_semaphore_release \$lock
-                   exit \$status)"; }
-
 # Bash-lambda multimethods
 
 # These work only on fully-named parameters, not on stuff coming from stdin. If
@@ -334,15 +294,134 @@ bash_lambda_defmulti() {
   bash_lambda_defn $1 '$(bash_lambda_ref_type $1)_'$multi_name' "$@"'; }
 
 # Multimethod definitions for bash-lambda functions
-# get finished  src/future
-# count         src/list src/semaphore
-# wrap          src/semaphore
+# state finished block notify  src/future
+# get                          src/future src/atom
+# unsafe_get                   src/atom
+# count                        src/list src/semaphore
+# grab release wrap            src/semaphore src/atom src/pipelock
 
 (declare method
- for method in get finished \
+ for method in state finished block notify \
+               get \
+               unsafe_get \
                count \
-               wrap; do
+               grab release wrap; do
    bash_lambda_defmulti $method; done) > /dev/null
+
+# Bash-lambda pipe locks
+
+# A pipe-lock is a way to block one process until another one lets it through.
+# This provides a way to block without polling, and is used internally by
+# futures.
+
+# WARNING
+# If you hand a pipelock to someone, you MUST block on it. If you don't, then
+# whoever attempts to unlock the pipelock will block, and this will result in
+# all kinds of problems and strange bugs.
+
+bash_lambda_pipelock() {
+  declare file=$(bash_lambda_sym pipelock)
+  rm $file && mkfifo $file
+  echo $file; }
+
+bash_lambda_pipelock_grab()    { cat $1 >& /dev/null; }
+bash_lambda_pipelock_release() { echo > $1; }
+
+# Bash-lambda semaphores and mutexes
+
+# Semaphores are directories that contain empty numbered subdirectories along
+# with an immutable file containing the capacity of the semaphore. Locking is
+# done by attempting to create one of these empty subdirectories, and ls -d |
+# wc -l is used to get the number of used entries.
+
+bash_lambda_semaphore() {
+  declare capacity=$1 semaphore=$(bash_lambda_dir semaphore)
+  echo $capacity > "$semaphore/capacity"
+  echo "$semaphore"; }
+
+bash_lambda_semaphore_grab() {
+  # Take an item from the semaphore; returns the item's identifier (a path, but
+  # you don't need to know this) and exit code 0 if successful, returns 1 and
+  # outputs nothing if unsuccessful.
+  declare semaphore=$1 i capacity=$(<"$1/capacity")
+  for (( i = 0; i < $capacity; i += 1 )); do
+    if mkdir "$semaphore/semaphore_$i" >& /dev/null; then
+      echo "$semaphore/semaphore_$i"; return 0; fi; done
+  return 1; }
+
+bash_lambda_semaphore_release() {
+  # Releases an item from the semaphore. You can just pass the item here; no
+  # need to pass the semaphore also.
+  rmdir "$1"; }
+
+bash_lambda_semaphore_count() {
+  # Counts the number of items available in the semaphore.
+  declare semaphore=$1
+  echo $(( $(<"$semaphore/capacity") + 1 - $(ls -d "$semaphore/"* | wc -l) )); }
+
+bash_lambda_semaphore_wrap() {
+  # Wraps a function's execution with a grab/release of a semaphore item.
+  declare s=$1 f=$2
+  bash_lambda_fn "declare lock
+                  if lock=\$(bash_lambda_semaphore_grab $s); then
+                    $f \"\$@\"
+                    declare status=\$?
+                    bash_lambda_semaphore_release \$lock
+                    exit \$status; fi"; }
+
+# Mutex: a more efficient way to do a single-element semaphore.
+bash_lambda_mutex()         { bash_lambda_dir mutex; }
+bash_lambda_mutex_grab()    { mkdir "$1/lock" >& /dev/null && echo "$1/lock"; }
+bash_lambda_mutex_release() { rmdir "$1"; }
+bash_lambda_mutex_count()   { [[ -d "$1/lock" ]]; echo $?; }
+
+bash_lambda_mutex_wrap() {
+  declare m=$1 f=$2
+  bash_lambda_fn "declare lock
+                  if lock=\$(bash_lambda_mutex_grab $m); then
+                    $f \"\$@\"
+                    declare status=\$?
+                    bash_lambda_mutex_release \$lock
+                    exit \$status; fi"; }
+
+# Bash-lambda atomic values
+
+# An atomic value supports thread-safe assignment and access. It does this by
+# guarding every read and write with a semaphore. You can also request a
+# transaction against the current value of an atomic value, so that during that
+# transaction any requests to change the value will block or fail.
+
+bash_lambda_atom() {
+  printf "%s\n%s" "$(bash_lambda_mutex)" \
+                  "$(echo "$1" | bash_lambda_cons)" | bash_lambda_cons atom; }
+
+bash_lambda_atom_grab() {
+  bash_lambda_mutex_grab "$(bash_lambda_nth 0 "$1")"; }
+
+bash_lambda_atom_release() { bash_lambda_mutex_release "$1"; }
+bash_lambda_atom_get()     { $(bash_lambda_atom_wrap "$1" cat); }
+
+# Unsafe-get is considerably faster than get, but does not respect the
+# atomicity of running transactions. Use this only when you have a single state
+# transition acting on the atom. (See src/future for an example)
+bash_lambda_atom_unsafe_get() { cat "$(bash_lambda_nth 1 "$1")"; }
+
+bash_lambda_atom_wrap() {
+  # A generalized transaction/set function. $(wrap $atom $f) does one of two
+  # things. If it acquires the atom's lock, then it invokes $f on a file
+  # containing the atom's current value. $f is free to modify the contents of
+  # this file.
+
+  # You will probably want to use one of the functions in src/wait instead of
+  # calling wrap directly.
+
+  declare atom=$1 f=$2
+  bash_lambda_fn "declare lock
+                  if lock=\$(bash_lambda_atom_grab $atom); then
+                    $f \"\$(bash_lambda_nth 1 $atom)\"
+                    declare status=\$?
+                    bash_lambda_atom_release \$lock
+                    exit \$status; fi"; }
 
 # Bash-lambda list programming constructs
 
@@ -408,15 +487,14 @@ bash_lambda_every() { cat ${2:--} |
 
 # Bash-lambda futures (asynchronous processes)
 
-# Futures are files consisting of three lines:
-# 1. The filename of the output collector
-# 2. The filename of the exit code collector
-# 3. The filename of the named pipe that will be closed upon completion
+# Future locking
+# It is surprisingly difficult to reliably wait for a future. We can't use the
+# 'wait' command because the future could belong to another subshell. We can't
+# use the process table or /proc because PIDs get reused. This leaves us with
+# two options: we can use polling against some lock file, or we can devise some
+# scheme with pipelocks.
 #
-# We can't use PID-based locking (e.g. via 'wait') because the future might
-# belong to a subshell. To fix this, we need to instead allocate a FIFO that
-# listeners can read against, and that the background job will close once it is
-# finished.
+# It turns out that we can use a semaphore to do everything we need.
 
 bash_lambda_future() {
   # Construct a future around the given function application. To do this, we
@@ -424,25 +502,40 @@ bash_lambda_future() {
   # We also record its exit code.
 
   declare output=$(bash_lambda_cons future_output < /dev/null)
-  declare exit_code=$(bash_lambda_cons future_status < /dev/null)
-  declare fifo=$(bash_lambda_cons future_fifo < /dev/null)
+  declare status=$(bash_lambda_cons future_status < /dev/null)
+  declare state=$(bash_lambda_atom running)
+  declare result=$(printf $"%s\n%s\n%s\n" $output $status $state | \
+                   bash_lambda_cons future)
 
-  rm $fifo && mkfifo $fifo
-
-  ("$@" > $output; echo $? > $exit_code; echo > $fifo; rm $fifo) >& /dev/null &
-  printf $"%s\n%s\n%s" $output $exit_code $fifo | bash_lambda_cons future; }
+  ("$@" > $output; echo $? > $status; notify $result) >& /dev/null &
+  echo $result; }
 
 bash_lambda_future_finished() {
   # Exits with 0 if the future is finished, 1 if still running. If 0, a
-  # future_get call will block only on IO, but not on job completion.
-  [[ -s "$(bash_lambda_nth 1 "$1")" ]]; }
+  # future_get call will block only on IO, but not on job completion. This
+  # operation can use unsafe_get because futures never un-finish.
+  [[ "$(bash_lambda_atom_unsafe_get "$(bash_lambda_nth 2 $1)")" == done ]]; }
+
+bash_lambda_future_state() {
+  bash_lambda_spin_wrap $(bash_lambda_nth 2 $1) cat; }
+
+bash_lambda_future_block() {
+  # Block on completion of the future. Spin-locks against the future's state.
+  declare pipelock=$(bash_lambda_spin_wrap $(bash_lambda_nth 2 $1) \
+    $(fn x "[[ \"\$(<\$x)\" == done ]] || bash_lambda_pipelock | tee -a \$x"))
+  [[ -z "$pipelock" ]] || bash_lambda_pipelock_grab $pipelock; }
+
+bash_lambda_future_notify() {
+  # Notify all listeners that this future is done. This amounts to unblocking
+  # all of the pipelocks that have been appended to the state.
+  bash_lambda_spin_wrap $(bash_lambda_nth 2 $1) \
+    $(fn x '[[ "$(<$x)" == done ]] || drop 1 $x | bash_lambda_map release
+            echo done > $x'); }
 
 bash_lambda_future_get() {
   # This function blocks on the future's process if it is still running, and
   # its stdout and exit code are proxied.
-
-  bash_lambda_future_finished "$1" ||
-    cat "$(bash_lambda_nth 2 "$1")" >& /dev/null
+  bash_lambda_future_finished "$1" || bash_lambda_future_block "$1"
   cat "$(bash_lambda_nth 0 "$1")"
   return "$(< "$(bash_lambda_nth 1 "$1")")"; }
 
@@ -500,6 +593,19 @@ bash_lambda_waiting_fn() {
   bash_lambda_fn "declare delay=$delay
                   until $f \"\$@\"; do sleep \$delay
                     delay=\$($adjust \$delay); done"; }
+
+bash_lambda_wait_until() { $(bash_lambda_waiting_fn "$@"); }
+
+bash_lambda_spinning_fn() {
+  # Returns a thunk that spins until the given function returns true. This
+  # should be used only for very quick waits.
+  declare f=$1
+  bash_lambda_fn "until $f \"\$@\"; do :; done"; }
+
+bash_lambda_spin_until() { $(bash_lambda_spinning_fn "$@"); }
+
+bash_lambda_wait_wrap() { $(wait_until $(bash_lambda_partial wrap "$@")); }
+bash_lambda_spin_wrap() { $(spin_until $(bash_lambda_partial wrap "$@")); }
 
 # Bash-lambda parallel execution
 

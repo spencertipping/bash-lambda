@@ -1,0 +1,19 @@
+#!/bin/bash
+# Bash-lambda pipe locks
+
+# A pipe-lock is a way to block one process until another one lets it through.
+# This provides a way to block without polling, and is used internally by
+# futures.
+
+# WARNING
+# If you hand a pipelock to someone, you MUST block on it. If you don't, then
+# whoever attempts to unlock the pipelock will block, and this will result in
+# all kinds of problems and strange bugs.
+
+bash_lambda_pipelock() {
+  declare file=$(bash_lambda_sym pipelock)
+  rm $file && mkfifo $file
+  echo $file; }
+
+bash_lambda_pipelock_grab()    { cat $1 >& /dev/null; }
+bash_lambda_pipelock_release() { echo > $1; }

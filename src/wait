@@ -17,3 +17,16 @@ bash_lambda_waiting_fn() {
   bash_lambda_fn "declare delay=$delay
                   until $f \"\$@\"; do sleep \$delay
                     delay=\$($adjust \$delay); done"; }
+
+bash_lambda_wait_until() { $(bash_lambda_waiting_fn "$@"); }
+
+bash_lambda_spinning_fn() {
+  # Returns a thunk that spins until the given function returns true. This
+  # should be used only for very quick waits.
+  declare f=$1
+  bash_lambda_fn "until $f \"\$@\"; do :; done"; }
+
+bash_lambda_spin_until() { $(bash_lambda_spinning_fn "$@"); }
+
+bash_lambda_wait_wrap() { $(wait_until $(bash_lambda_partial wrap "$@")); }
+bash_lambda_spin_wrap() { $(spin_until $(bash_lambda_partial wrap "$@")); }
