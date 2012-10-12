@@ -539,6 +539,11 @@ bash_lambda_future_get() {
   cat "$(bash_lambda_nth 0 "$1")"
   return "$(< "$(bash_lambda_nth 1 "$1")")"; }
 
+bash_lambda_future_unsafe_get() {
+  # Gets whatever stdout has been produced so far. The process may not have
+  # exited, so this function returns 0.
+  cat "$(bash_lambda_nth 0 "$1")"; }
+
 bash_lambda_future_transpose() {
   bash_lambda_future $(bash_lambda_partial \
     bash_lambda_map bash_lambda_future_get $1); }

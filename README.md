@@ -364,6 +364,21 @@ $
 The exit code is also memoized; however, standard error and other side-effects
 are not. There is no way to clear a future after it has finished executing.
 
+### Partial results
+
+You can use `unsafe_get` to retrieve whatever stdout has been produced without
+blocking on the process itself. The function isn't unsafe in that it will blow
+up or anything, but it may not fully reflect the state of the future (e.g. the
+future may have completed by the time `unsafe_get` returns):
+
+```
+$ f=$(future $(fn 'sleep 10; echo hi'))
+$ unsafe_get $f         # returns quickly
+$ get $f                # takes a while
+hi
+$
+```
+
 ### Futures and lists
 
 You can transpose a list of futures into a future of a list using
