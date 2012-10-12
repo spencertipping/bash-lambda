@@ -122,8 +122,7 @@ $ map $(partial $add 5) $(list $(map $(partial $add 1) $(list 1 2 3)))
 $
 ```
 
-Alternatively, just use pipes. This allows you to process lists of arbitrary
-size.
+Alternatively, just use pipes. This allows you to process lists lazily.
 
 ```
 $ map $(partial $add 1) $(list 1 2 3) | map $(partial $add 5)
@@ -163,6 +162,18 @@ $ repeatedly $rand_int 100 | $sum_list
 1566864
 
 $ our_numbers=$(list $(repeatedly $rand_int 100))
+```
+
+Another function, `reductions`, returns the intermediate results of reducing a
+list:
+
+```
+$ seq 1 4 | reductions $add 0
+1
+3
+6
+10
+$
 ```
 
 ### Flatmap (mapcat in Clojure)
@@ -324,15 +335,14 @@ $
 
 The resulting list is order-preserving.
 
-## Garbage collection
+## References and garbage collection
 
 Bash-lambda implements a conservative concurrent mark-sweep garbage collector
 that runs automatically if an allocation is made more than 30 seconds since the
 last GC run. This prevents the disk from accumulating tons of unused files from
 anonymous functions, partials, compositions, etc.
 
-You can also trigger a synchronous GC by running the `bash_lambda_gc` function
-(just `gc` for short):
+You can also trigger a synchronous GC by running the `bash_lambda_gc` function:
 
 ```
 $ bash_lambda_gc
@@ -342,6 +352,43 @@ $
 
 The two numbers are the number and size of reclaimed objects. If it says `0 0`,
 then no garbage was found.
+
+### Saving complete references
+
+You can serialize any anonymous function, composition, partial application,
+list, or completed future (you can't serialize a running future for obvious
+reasons). To do that, use the `ref_snapshot` function, which returns the
+filename of a heap-allocated tar.gz file:
+
+```
+$ f=$(fn x 'echo $((x + 1))')
+$ g=$(comp $f $f)
+$ h=$(comp $g $f)
+$ ref_snapshot $h
+/tmp/blheap-12328-29f272454ea973c4561b2d1238957b7d0b2c/shapshot_u2C3u3QXO3cRpQ
+$ tar -tvf $(ref_snapshot $h)
+-rwx------ spencertipping/spencertipping 44 2012-10-11 23:01 /tmp/blheap-12328-29f272454ea973c4561b2d1238957b7d0b2c/fn_mm7fTv75AQZ4lf
+-rwx------ spencertipping/spencertipping 174 2012-10-11 23:01 /tmp/blheap-12328-29f272454ea973c4561b2d1238957b7d0b2c/fn_oiKxIgZQwPnmTD
+-rwx------ spencertipping/spencertipping 174 2012-10-11 23:01 /tmp/blheap-12328-29f272454ea973c4561b2d1238957b7d0b2c/fn_Uq2O7rtISqbfw3
+$
+```
+
+This tar.gz file will be garbage-collected just like any other object. You can
+extract a heap snapshot on the same or a different machine by using `tar
+-xzPf`, or by using `ref_intern`:
+
+```
+$ def f $(comp ...)
+$ scp $(ref_snapshot $BASH_LAMBDA_HEAP/f) other-machine:snapshot
+$ ssh other-machine
+other-machine$ ref_intern snapshot
+other-machine$ original-heap-name/f
+```
+
+Notice that you'll need to communicate not only the function's data but also
+its name; `ref_snapshot` and `ref_intern` are low-level functions that aren't
+designed to be used directly for remoting (though they probably do most of the
+work).
 
 ### Inspecting heap state
 
@@ -355,10 +402,11 @@ permanent:           54
 $
 ```
 
-You can also inspect the root set and find the references for any object:
+You can also inspect the root set and find the immediate references for any
+object:
 
 ```
-$ gc_roots | gc_refs
+$ gc_roots | ref_children
 /tmp/blheap-xxxx-xxxxxxxxxxx/gc_roots
 /tmp/blheap-xxxx-xxxxxxxxxxx/gc_roots
 /tmp/blheap-xxxx-xxxxxxxxxxx/gc_roots
@@ -370,7 +418,7 @@ $ cat $(partial $add 5) | gc_refs
 $
 ```
 
-The output of `gc_refs` includes weak references. You can detect weak or
+The output of `ref_children` includes weak references. You can detect weak or
 fictitious references by looking for slashes in whatever follows
 `$BASH_LAMBDA_HEAP/`:
 
@@ -382,15 +430,25 @@ not real
 $
 ```
 
+If you need the full transitive closure, you can use `ref_closure`. This
+function encapsulates the algorithm used by the GC to find live references.
+
 ### Pinning objects
 
-The root set is built from all variables you have declared in your shell. This
-includes any functions you've written, etc. However, there may be cases where
-you need to pin a reference so that it will never be collected. You can do this
-using `bash_lambda_gc_pin`, or just `gc_pin` for short:
+The root set is built from all variables you have declared in your shell and
+all running processes. This includes any functions you've written, etc.
+However, there may be cases where you need to pin a reference so that it will
+never be collected. You can do this using `bash_lambda_gc_pin`, or just
+`gc_pin` for short:
 
 ```
 $ pinned_function=$(gc_pin $(fn x 'echo $x'))
+```
+
+You can use an analogous function, unpin, to remove something's pinned status:
+
+```
+$ f=$(gc_unpin $pinned_function)
 ```
 
 ### Weak references
@@ -443,7 +501,7 @@ objects to be collected when they shouldn't. So far these cases are:
    Allocations made by those parameter substitutions will be live but may be
    collected anyway since they are not visible in the process table.
 2. ~~By extension, any commands that have delayed parts:~~
-   ~~`sleep 10; map $(fn ...) $xs`. We can't read the memory of the bash~~
+   `sleep 10; map $(fn ...) $xs`.~~ We can't read the memory of the bash~~
    ~~process, so we won't be able to know whether the `$(fn)` is still in the~~
    ~~live set.~~
    This is incorrect. Based on some tests I ran, `$()` expressions inside

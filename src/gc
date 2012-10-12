@@ -8,6 +8,14 @@ export BASH_LAMBDA_GC_CONCURRENT=${BASH_LAMBDA_GC_CONCURRENT:-1}
 
 mkdir -p "$BASH_LAMBDA_HEAP"/.gc-permanent
 
+# Can we see this unexported variable from the garbage collector? If not, then
+# we don't have access to the full root set. If you unset this, GC will refuse
+# to run. We need this to be a weak ref so the exported variable doesn't show
+# up in the root set by itself. These two variables should be identical modulo
+# path.
+BASH_LAMBDA_GC_CANARY=$(bash_lambda_cons < /dev/null)
+export BASH_LAMBDA_GC_KEY=$(bash_lambda_weak_ref $BASH_LAMBDA_GC_CANARY)
+
 # This function can be run asynchronously: bash_lambda_gc &. See
 # bash_lambda_auto_gc for an example. It knows which heap to run on, and it
 # echoes information about the number of objects and bytes reclaimed.
@@ -27,12 +35,12 @@ bash_lambda_gc() {
   # We have the lock. At this point the heap allocator will mark any new
   # objects that are created, so we can use the root set that exists right now
   # and start marking objects referenced by that root set.
-  bash_lambda_gc_roots | bash_lambda_gc_refs | (declare x; while read x; do
-    bash_lambda_gc_visit "$x"; done)
+  bash_lambda_gc_roots | bash_lambda_ref_children | (declare x; while read x; do
+    bash_lambda_ref_visit "$BASH_LAMBDA_HEAP/.gc-visited-set" "$x"; done)
 
   # We should mark the canary. If we haven't done this, then something is wrong
   # with the root-set computation.
-  if [[ ! -e "$BASH_LAMBDA_HEAP/.gc-marked-set/${BASH_LAMBDA_GC_KEY##*/}" ]]
+  if [[ ! -e "$BASH_LAMBDA_HEAP/.gc-visited-set/${BASH_LAMBDA_GC_KEY##*/}" ]]
   then
     echo 'bash_lambda_gc cannot see the full root set. You should make sure'
     echo 'it is being run as a function, not as an indirect script; try using'
@@ -45,6 +53,7 @@ bash_lambda_gc() {
     declare ref reclaimed=() reclaimed_size=0
     while read ref; do
       if [[ ! -e "$BASH_LAMBDA_HEAP/.gc-marked-set/${ref##*/}" &&
+            ! -e "$BASH_LAMBDA_HEAP/.gc-visited-set/${ref##*/}" &&
             ! -e "$BASH_LAMBDA_HEAP/.gc-permanent/${ref##*/}" ]]; then
         reclaimed+=("$ref")
         reclaimed_size=$((reclaimed_size + $(du -sb "$ref" | cut -f 1)))
@@ -79,61 +88,10 @@ bash_lambda_heap_stats() {
     'objects:'   $(ls "$BASH_LAMBDA_HEAP" | wc -l) \
     'permanent:' $(ls "$BASH_LAMBDA_HEAP/.gc-permanent" | wc -l); }
 
-bash_lambda_gc_pin() {
-  # Pins an object so that it will never be collected.
-  touch "$BASH_LAMBDA_HEAP/.gc-permanent/${1##*/}";
-  echo "$1"; }
+bash_lambda_gc_pin()   { touch "$BASH_LAMBDA_HEAP/.gc-permanent/${1##*/}";
+                         echo "$1"; }
+
+bash_lambda_gc_unpin() { rm -f "$BASH_LAMBDA_HEAP/.gc-permanent/${1##*/}";
+                         echo "$1"; }
 
 bash_lambda_gc_roots() { declare; ps ax; }
-
-bash_lambda_gc_visit() {
-  # The ref in question must be an object that exists in the heap. We expect it
-  # to be a full pathname, though the object itself should be a direct child of
-  # the heap directory.
-  declare ref="$1"
-  declare ref_name="${ref#$BASH_LAMBDA_HEAP/}"
-
-  # Is this a fictitious reference? If so, do nothing.
-  [[ -L "$ref" || "$ref_name" == ".gc-marked-set"
-               || "$ref_name" == ".gc-visited-set" ]] && return 0
-
-  # No need to mark an object in a subdirectory. It isn't a direct child of the
-  # heap, so its storage is already being managed by the directory it belongs
-  # to.
-  if [[ ! ("$ref_name" =~ /) ]]; then
-    # Have we already visited this object? If so, no need to revisit it.
-    [[ -e "$BASH_LAMBDA_HEAP/.gc-visited-set/$ref_name" ]] && return 0
-
-    # Otherwise, mark the object and everything it points to.
-    touch "$BASH_LAMBDA_HEAP"/.gc-{marked,visited}-set/"$ref_name"; fi
-
-  # Make sure any recursive calls happen inside a subshell. Otherwise we'll
-  # corrupt local variables.
-  if [[ -d "$ref" ]]; then
-    ls -d "$ref"/* | (declare x; while read x; do
-                        bash_lambda_gc_visit "$x"; done)
-  else
-    # Search for GC refs in the child.
-    bash_lambda_gc_refs < "$ref" | (declare x; while read x; do
-                                      bash_lambda_gc_visit "$x"; done); fi; }
-
-bash_lambda_gc_refs() {
-  # Locate occurrences of the heap directory. This name contains 128 bits of
-  # pseudorandom entropy, so we are unlikely to see it spuriously referenced.
-  # If we observe a path that exists, then we consider that to be a reference
-  # for GC purposes.
-  #
-  # Note that we don't consider FIFOs to be references. These are used by
-  # futures for locking, and if we tried to read from them we could stop the GC
-  # process.
-
-  egrep -o "$BASH_LAMBDA_HEAP/[^ [:space:]/\)\}\"']+" | (declare ref
-    while read ref; do [[ -e "$ref" && ! -p "$ref" ]] && echo "$ref"; done); }
-
-# Can we see this unexported variable from the garbage collector? If not, then
-# we don't have access to the full root set. If you unset this, GC will refuse
-# to run. We need this to be a weak ref so the exported variable doesn't show
-# up in the root set by itself. These two variables should be identical modulo
-# path.
-BASH_LAMBDA_GC_CANARY=$(bash_lambda_cons < /dev/null)
-export BASH_LAMBDA_GC_KEY=$(bash_lambda_weak_ref $BASH_LAMBDA_GC_CANARY)

@@ -23,6 +23,12 @@ bash_lambda_filter() { cat ${2:--} |
                        (declare x; while read x; do
                                      $1 "$x" > /dev/null && echo "$x"; done); }
 
+bash_lambda_reductions() { declare f="$1" x="$2"
+                           cat ${3:--} |
+                           (declare y
+                            while read y; do x="$($f "$x" "$y")"; echo "$x"
+                            done); }
+
 # List generators
 bash_lambda_iterate() { declare x="$2"
                         echo "$x"; while x="$($1 "$x")"; do echo "$x"; done; }

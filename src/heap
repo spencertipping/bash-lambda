@@ -24,18 +24,26 @@ trap bash_lambda_nuke_heap EXIT
 export PATH="$PATH:$BASH_LAMBDA_HEAP"
 
 # Heap allocation
-bash_lambda_gensym() { mktemp "$BASH_LAMBDA_HEAP/${1:-gensym}_XXXXXXXXXXXX"; }
+bash_lambda_gensym() { mktemp "$BASH_LAMBDA_HEAP/${1:-gensym}_XXXXXXXXXXXXXX"; }
+bash_lambda_gendir() { mktemp -d "$BASH_LAMBDA_HEAP/${1:-gensym}_XXXXXXXXXXX"; }
 
-bash_lambda_cons() {
-  if [[ $1 == '-n' ]]; then declare file=$BASH_LAMBDA_HEAP/$2
-  else                      declare file="$(bash_lambda_gensym $1)"; fi
+bash_lambda_sym() { bash_lambda_gc_guard "$(bash_lambda_gensym)"; }
+bash_lambda_dir() { bash_lambda_gc_guard "$(bash_lambda_gendir)"; }
+
+bash_lambda_gc_guard() {
+  declare file=$1
 
   # If garbage collection is in-progress, mark the object to prevent it from
   # being collected this time around. We don't mark it as having been visited,
   # however; doing that would cause anything it makes live to be collected
   # erroneously.
   touch "$BASH_LAMBDA_HEAP/.gc-marked-set/${file##*/}" >& /dev/null
+  echo "$file"; }
 
-  cat - > $file &&      # Take everything from stdin
-    chmod u+x $file &&  # All conses are executable
-    echo $file; }
+bash_lambda_cons() {
+  if [[ $1 == '-n' ]]; then declare file=$BASH_LAMBDA_HEAP/$2
+  else                      declare file="$(bash_lambda_gensym $1)"; fi
+
+  cat > $(bash_lambda_gc_guard "$file") &&      # Take everything from stdin
+    chmod u+x "$file"                   &&      # All conses are executable
+    echo "$file"; }

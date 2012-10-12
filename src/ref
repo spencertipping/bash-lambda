@@ -6,3 +6,58 @@
 # this purpose.
 bash_lambda_weak_ref() {
   echo "$BASH_LAMBDA_HEAP/.weak-references/${1##$BASH_LAMBDA_HEAP/}"; }
+
+bash_lambda_ref_snapshot() {
+  tar -czP $(bash_lambda_ref_closure "$1") | bash_lambda_cons shapshot; }
+
+bash_lambda_ref_intern() { cat ${1:--} | tar -xzP; }
+
+bash_lambda_ref_closure() {
+  declare visited=$(bash_lambda_dir) object=$1
+  bash_lambda_ref_visit "$visited" "$object"
+  ls -d "$visited"/* | (declare x; while read x; do
+    echo "$BASH_LAMBDA_HEAP/${x##$visited/}"; done); }
+
+bash_lambda_ref_visit() {
+  # The ref in question must be an object that exists in the heap. We expect it
+  # to be a full pathname, though the object itself should be a direct child of
+  # the heap directory.
+  declare directory="$1" ref="$2"
+  declare ref_name="${ref#$BASH_LAMBDA_HEAP/}"
+
+  # Is this a fictitious reference or something that belongs to the GC?
+  [[ -L "$ref" || "$ref_name" == ".gc-marked-set"
+               || "$ref_name" == ".gc-visited-set" ]] && return 0
+
+  # No need to mark an object in a subdirectory. It isn't a direct child of the
+  # heap, so its storage is already being managed by the directory it belongs
+  # to.
+  if [[ ! ("$ref_name" =~ /) ]]; then
+    # Have we already visited this object? If so, no need to revisit it.
+    [[ -e "$directory/$ref_name" ]] && return 0
+
+    # Otherwise, mark the object and everything it points to.
+    touch "$directory/$ref_name"; fi
+
+  # Make sure any recursive calls happen inside a subshell. Otherwise we'll
+  # corrupt local variables.
+  if [[ -d "$ref" ]]; then
+    ls -d "$ref"/* | (declare x; while read x; do
+                        bash_lambda_ref_visit "$directory" "$x"; done)
+  else
+    # Search for other references in the child.
+    bash_lambda_ref_children < "$ref" | (declare x
+      while read x; do bash_lambda_ref_visit "$directory" "$x"; done); fi; }
+
+bash_lambda_ref_children() {
+  # Locate occurrences of the heap directory. This name contains 128 bits of
+  # pseudorandom entropy, so we are unlikely to see it spuriously referenced.
+  # If we observe a path that exists, then we consider that to be a reference
+  # for GC purposes.
+  #
+  # Note that we don't consider FIFOs to be references. These are used by
+  # futures for locking, and if we tried to read from them we could stop the GC
+  # process.
+
+  egrep -o "$BASH_LAMBDA_HEAP/[^ [:space:]/\)\}\"']+" | (declare ref
+    while read ref; do [[ -e "$ref" && ! -p "$ref" ]] && echo "$ref"; done); }

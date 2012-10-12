@@ -22,8 +22,7 @@ bash_lambda_future() {
 
   rm $fifo && mkfifo $fifo
 
-  ("$@" > $output; echo $? > $exit_code; (echo; sleep 1; echo) > $fifo &
-                                         rm $fifo) >& /dev/null &
+  ("$@" > $output; echo $? > $exit_code; echo > $fifo; rm $fifo) >& /dev/null &
   printf $"%s\n%s\n%s" $output $exit_code $fifo | bash_lambda_cons future; }
 
 bash_lambda_future_done() {
