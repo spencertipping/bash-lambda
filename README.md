@@ -307,7 +307,7 @@ full spin or delay:
 ```
 $ lock=$(pipelock)
 $ ln -s $lock my-pipelock
-$ pipelock_grab $pipe           # blocks until...
+$ pipelock_grab $lock           # blocks until...
 
 other-terminal$ pipelock_release my-pipelock
 other-terminal$
