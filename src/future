@@ -38,3 +38,9 @@ bash_lambda_future_get() {
   bash_lambda_future_done "$1" || cat "$(bash_lambda_nth 2 "$1")" >& /dev/null
   cat "$(bash_lambda_nth 0 "$1")"
   return "$(< "$(bash_lambda_nth 1 "$1")")"; }
+
+bash_lambda_future_transpose() {
+  # transpose list of futures = future of list
+  declare filename=$1
+  bash_lambda_future $(bash_lambda_partial \
+    bash_lambda_map bash_lambda_future_get $filename); }

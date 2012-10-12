@@ -30,11 +30,11 @@ trap bash_lambda_nuke_heap EXIT
 export PATH="$PATH:$BASH_LAMBDA_HEAP"
 
 # Heap allocation
-bash_lambda_gensym() { echo "${1:-gensym}_$$_$(date +%s_%N)"; }
+bash_lambda_gensym() { mktemp "$BASH_LAMBDA_HEAP/${1:-gensym}_XXXXXXXXXXXX"; }
 
 bash_lambda_cons() {
-  declare file="$BASH_LAMBDA_HEAP/$(bash_lambda_gensym $1)"
-  if [[ $1 == '-n' ]]; then file=$BASH_LAMBDA_HEAP/$2; fi
+  if [[ $1 == '-n' ]]; then declare file=$BASH_LAMBDA_HEAP/$2
+  else                      declare file="$(bash_lambda_gensym $1)"; fi
 
   # If garbage collection is in-progress, mark the object to prevent it from
   # being collected this time around. We don't mark it as having been visited,
@@ -46,7 +46,7 @@ bash_lambda_cons() {
     chmod u+x $file &&  # All conses are executable
     echo $file; }
 
-# Bash-lambda weak references
+# Bash-lambda reference functions
 
 # A weak reference is a path that resolves the same way as a regular path, but
 # that isn't followed by the garbage collector. src/heap sets up a symlink for
@@ -329,6 +329,12 @@ bash_lambda_future_get() {
   bash_lambda_future_done "$1" || cat "$(bash_lambda_nth 2 "$1")" >& /dev/null
   cat "$(bash_lambda_nth 0 "$1")"
   return "$(< "$(bash_lambda_nth 1 "$1")")"; }
+
+bash_lambda_future_transpose() {
+  # transpose list of futures = future of list
+  declare filename=$1
+  bash_lambda_future $(bash_lambda_partial \
+    bash_lambda_map bash_lambda_future_get $filename); }
 
 # Bash-lambda function exporting and GC hooks
 

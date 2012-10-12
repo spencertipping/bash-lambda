@@ -24,11 +24,11 @@ trap bash_lambda_nuke_heap EXIT
 export PATH="$PATH:$BASH_LAMBDA_HEAP"
 
 # Heap allocation
-bash_lambda_gensym() { echo "${1:-gensym}_$$_$(date +%s_%N)"; }
+bash_lambda_gensym() { mktemp "$BASH_LAMBDA_HEAP/${1:-gensym}_XXXXXXXXXXXX"; }
 
 bash_lambda_cons() {
-  declare file="$BASH_LAMBDA_HEAP/$(bash_lambda_gensym $1)"
-  if [[ $1 == '-n' ]]; then file=$BASH_LAMBDA_HEAP/$2; fi
+  if [[ $1 == '-n' ]]; then declare file=$BASH_LAMBDA_HEAP/$2
+  else                      declare file="$(bash_lambda_gensym $1)"; fi
 
   # If garbage collection is in-progress, mark the object to prevent it from
   # being collected this time around. We don't mark it as having been visited,

@@ -232,6 +232,16 @@ its only result is its status code. (For `some`, it means nothing was found, so
 it returns 1; for `every`, it means they all satisfied the predicate, so it
 returns 0.)
 
+It also gives you the `nth` function, which does exactly what you would expect:
+
+```
+$ nth 0 $(list 1 2 3)
+1
+$ list 1 2 3 | nth 2
+3
+$
+```
+
 ## Closures
 
 There are two ways you can allocate closures, one of which is true to the usual
@@ -267,6 +277,52 @@ Values are just files, so you can save one for later:
 ```
 $ cp $our_numbers the-list
 ```
+
+## Futures
+
+Futures are asynchronous processes that you can later force to get their
+values. Bash-lambda implements the `future` function, which asynchronously
+executes another function and allows you to monitor its status:
+
+```
+$ f=$(future $(fn 'sleep 10; echo hi'))
+$ future_done $f || echo waiting
+waiting
+$ time future_get $f
+hi
+
+real    0m7.707s
+user    0m0.016s
+sys     0m0.052s
+$
+```
+
+### Futures and lists
+
+You can transpose a list of futures into a future of a list using
+`future_transpose`:
+
+```
+$ f=$(fn 'sleep 10; echo $RANDOM')
+$ futures=$(list $(repeatedly $(partial future $f) 10))
+$ single=$(future_transpose $futures)
+$ future_done $single || echo waiting
+waiting
+$ future_get $single    # takes a moment
+21297
+26453
+28753
+23369
+21573
+19249
+25975
+12058
+21774
+469
+$
+```
+
+The resulting list is order-preserving.
 
 ## Garbage collection
 
