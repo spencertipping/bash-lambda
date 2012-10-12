@@ -13,7 +13,7 @@ bash_lambda_genkey() { declare i
 # Allow the user to override the heap location if they want to. However, this
 # may compromise the effectiveness of conservative GC.
 export BASH_LAMBDA_KEY=$(bash_lambda_genkey)
-export BASH_LAMBDA_HEAP=${BASH_LAMBDA_HEAP:-/tmp/blheap-$$-$BASH_LAMBDA_KEY}
+export BASH_LAMBDA_HEAP=${BASH_LAMBDA_HEAP:-${TMPDIR:-/tmp}/blheap-$$-$BASH_LAMBDA_KEY}
 
 mkdir -p "$BASH_LAMBDA_HEAP" || return 1
 ln -s "$BASH_LAMBDA_HEAP" "$BASH_LAMBDA_HEAP/.weak-references"
