@@ -652,9 +652,9 @@ bash_lambda_init() {
   (declare fn; while read fn; do
     bash_lambda_extern $fn > /dev/null
     if [[ -z "$BASH_LAMBDA_NO_ALIASES" ]]; then
-      bash_lambda_def ${fn##bash_lambda_} $fn; fi; done); }
+      bash_lambda_def ${fn##bash_lambda_} $fn; fi; done) & }
 
-bash_lambda_init
+(bash_lambda_init)
 
 # Run a GC, if necessary, after each command
 export PROMPT_COMMAND="$PROMPT_COMMAND; bash_lambda_auto_gc"

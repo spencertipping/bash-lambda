@@ -2,8 +2,8 @@
 
 Real lambda support for bash (a functionally complete hack). Includes a set of
 functions for functional programming, list allocation and traversal, futures,
-closure serialization, and concurrent mark/sweep garbage collection with weak
-reference support.
+complete closure serialization, remote closure execution, multimethods, and
+concurrent mark/sweep garbage collection with weak reference support.
 
 ## NOTE
 
@@ -290,7 +290,35 @@ Values are just files, so you can save one for later:
 $ cp $our_numbers the-list
 ```
 
-## Futures
+## Atoms and locking
+
+Atoms are atomic values that use spin or wait locks to provide transactions.
+They are used extensively under the hood for things like futures, but in
+general you will probably not find much use for them.
+
+However, if you're curious, you should check out `src/atom` and
+`src/semaphore`.
+
+### Pipelocks
+
+This provides an instant lock/release lock that doesn't incur the overhead of a
+full spin or delay:
+
+```
+$ lock=$(pipelock)
+$ ln -s $lock my-pipelock
+$ pipelock_grab $pipe           # blocks until...
+
+other-terminal$ pipelock_release my-pipelock
+other-terminal$
+
+# ... we free it using pipelock_release from the other terminal
+$
+```
+
+See `src/pipelock` for implementation details.
+
+## Futures and remote execution
 
 Futures are asynchronous processes that you can later force to get their
 values. Bash-lambda implements the `future` function, which asynchronously
@@ -308,6 +336,33 @@ user    0m0.016s
 sys     0m0.052s
 $
 ```
+
+### Futures as memoized results
+
+When you create a future, standard out is piped into a file that is then
+replayed. This file is preserved as long as you have live references to the
+future object, so you can replay the command's output at very little cost. For
+example:
+
+```
+$ f=$(future $(fn 'sleep 10; echo hi'))
+$ time get $f   # long runtime
+hi
+
+real    0m8.436s
+user    0m0.128s
+sys     0m0.208s
+$ time get $f   # short runtime; result is cached
+hi
+
+real    0m0.116s
+user    0m0.044s
+sys     0m0.060s
+$
+```
+
+The exit code is also memoized; however, standard error and other side-effects
+are not. There is no way to clear a future after it has finished executing.
 
 ### Futures and lists
 
@@ -338,6 +393,78 @@ The resulting list is order-preserving.
 
 Both `future_finished` and `future_get` are implemented as multimethods, so you
 can simply use `finished` and `get` instead.
+
+### Parallel mapping
+
+You can apply bounded parallelism to the elements of a list by using
+`parallel_map`. This function returns a lazily computed list of futures; if you
+need all of the results at once, you can use `future_transpose`.
+
+The advantage of `parallel_map $f` over `map $(comp future $f)` is that you can
+limit the maximum number of running jobs. This lets you have functionality
+analogous to `make -jN`, but for general-purpose list mapping. Like `map`,
+`parallel_map` is order-preserving. For example:
+
+```
+$ compile=$(fn cfile 'gcc $cfile -o ${cfile%.c}')
+$ futures=$(list $(ls | parallel_map $compile))
+$ map get $futures      # force each one
+...
+$
+```
+
+### Remote execution
+
+The `remote` function sends a function, along with any heap dependencies it
+has, to another machine via SSH and runs it there, piping back the standard
+output to the local machine. For example:
+
+```
+$ check_disk_space=$(fn 'df -h')
+$ remote some-machine $check_disk_space
+...
+Filesystem Size Used Avail Use% Mounted on
+/dev/sda1  250G 125G  125G  50% /
+...
+$
+```
+
+This can be useful in conjunction with futures.
+
+## Multimethods
+
+These aren't quite as cool as the ones in Clojure (and they're a lot slower),
+but bash-lambda implements multimethods that allow you to have OO-style
+polymorphism. This is based around the idea of a `ref_type`, which is a
+filename prefix that gets added to various kinds of objects:
+
+```
+$ map ref_type $(list $(list) $(fn 'true') $(pipelock) $(semaphore 5))
+list
+fn
+pipelock
+semaphore
+$
+```
+
+Whenever you have a function called `$(ref_type $x)_name`, for instance
+`future_get`, you can omit the `future_` part if you're passing an object with
+that `ref_type` as the first argument (which you often do). So:
+
+```
+$ get $(future $(fn 'echo hi'))
+hi
+$ future_get $(future $(fn 'echo hi'))
+hi
+$ get $(atom 100)
+100
+$ atom_get $(atom 100)
+100
+$
+```
+
+You use `defmulti` to define a new multimethod. Examples of this are in
+`src/multi`.
 
 ## References and garbage collection
 
