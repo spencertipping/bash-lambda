@@ -1,0 +1,41 @@
+#!/bin/bash
+# Bash-lambda semaphores
+
+# Semaphores are directories that contain empty numbered subdirectories along
+# with an immutable file containing the capacity of the semaphore. Locking is
+# done by attempting to create one of these empty subdirectories, and ls -d |
+# wc -l is used to get the number of used entries.
+
+bash_lambda_semaphore() {
+  declare capacity=$1 semaphore=$(bash_lambda_dir semaphore)
+  echo $capacity > "$semaphore/capacity"
+  echo "$semaphore"; }
+
+bash_lambda_semaphore_take() {
+  # Take an item from the semaphore; returns the item's identifier (a path, but
+  # you don't need to know this) and exit code 0 if successful, returns 1 and
+  # outputs nothing if unsuccessful.
+  declare semaphore=$1 i
+  for (( i = 0; i < $(<"$semaphore/capacity"); i += 1 )); do
+    if mkdir "$semaphore/$i" >& /dev/null; then
+      echo "$semaphore/$i"; return 0; fi; done
+  return 1; }
+
+bash_lambda_semaphore_release() {
+  # Releases an item from the semaphore. You can just pass the item here; no
+  # need to pass the semaphore also.
+  rmdir "$1"; }
+
+bash_lambda_semaphore_count() {
+  # Counts the number of items available in the semaphore.
+  declare semaphore=$1
+  echo $(( $(<"$semaphore/capacity") + 1 - $(ls -d "$semaphore/"* | wc -l) )); }
+
+bash_lambda_semaphore_wrap() {
+  # Wraps a function's execution with a take/release of a semaphore item.
+  declare s=$1 f=$2
+  bash_lambda_fn "declare lock=\$(bash_lambda_semaphore_take $s) &&
+                  ($f \"\$@\"
+                   declare status=\$?
+                   bash_lambda_semaphore_release \$lock
+                   exit \$status)"; }

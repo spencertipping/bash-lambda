@@ -29,6 +29,17 @@ bash_lambda_reductions() { declare f="$1" x="$2"
                             while read y; do x="$($f "$x" "$y")"; echo "$x"
                             done); }
 
+bash_lambda_partition() { declare n=$1
+                          cat ${2:--} |
+                          while (declare i x xs=()
+                                 for (( i = 0; i < n; i += 1 )); do
+                                   read x && xs+=($x); done
+                                 x=$?
+                                 bash_lambda_list "${xs[@]}"
+                                 return $x); do :; done; }
+
+bash_lambda_list_count() { wc -l < "$1"; }
+
 # List generators
 bash_lambda_iterate() { declare x="$2"
                         echo "$x"; while x="$($1 "$x")"; do echo "$x"; done; }

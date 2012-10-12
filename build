@@ -1,6 +1,10 @@
 #!/bin/bash
-(cat src/header; for file in heap ref gc fn fp multi list future init; do
+(cat src/header
+ for file in heap ref gc fn fp \
+             semaphore multi \
+             list \
+             future remote wait parallel init; do
   cat src/$file | grep -v '^#!'
-  echo
-done) > bash-lambda
+  echo; done) > bash-lambda
+
 chmod +x bash-lambda

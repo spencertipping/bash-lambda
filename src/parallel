@@ -1,0 +1,37 @@
+#!/bin/bash
+# Bash-lambda parallel execution
+
+# Parallel tasks are defined as an interface that transposes parallelism over
+# lists. They generally return futures. You should set the
+# BASH_LAMBDA_PARALLELISM value to something more specific to your own system,
+# depending on available CPUs and memory.
+#
+# There is a considerable degree of overhead (on the order of seconds)
+# associated with using these parallel methods.
+
+export BASH_LAMBDA_PARALLELISM=4
+
+bash_lambda_parallel_map() {
+  # Maps a function over a list in parallel. Results retain their original
+  # order. An optional third parameter allows you to override the default level
+  # of parallelism.
+
+  # This function returns a list of futures, each of which represents an
+  # intermediate outcome. The futures are generated lazily, so in theory you
+  # could have an infinite source list and, so long as you requested only a
+  # finite number of elements, you would be ok. (In practice, I think this is a
+  # dangerous strategy.) To get the completed results for a segment of the
+  # list:
+  #
+  # $ get $(transpose $(list $(parallel_map $f $xs | take 5)))
+
+  # Note: If your function returns a nonzero exit code, it will be run again on
+  # the same data.
+
+  declare f=$1 xs=$2 n=${3:-$BASH_LAMBDA_PARALLELISM}
+  declare s=$(bash_lambda_semaphore $n)
+
+  declare blocking_f=$(bash_lambda_waiting_fn \
+                        $(bash_lambda_semaphore_wrap $s $f))
+
+  bash_lambda_map $(bash_lambda_partial bash_lambda_future $blocking_f) $xs; }

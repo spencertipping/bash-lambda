@@ -20,3 +20,14 @@
 bash_lambda_defmulti() {
   declare multi_name=$1
   bash_lambda_defn $1 '$(bash_lambda_ref_type $1)_'$multi_name' "$@"'; }
+
+# Multimethod definitions for bash-lambda functions
+# get finished  src/future
+# count         src/list src/semaphore
+# wrap          src/semaphore
+
+(declare method
+ for method in get finished \
+               count \
+               wrap; do
+   bash_lambda_defmulti $method; done) > /dev/null

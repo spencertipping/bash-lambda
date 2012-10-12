@@ -27,8 +27,8 @@ export PATH="$PATH:$BASH_LAMBDA_HEAP"
 bash_lambda_gensym() { mktemp "$BASH_LAMBDA_HEAP/${1:-gensym}_XXXXXXXXXXXXXX"; }
 bash_lambda_gendir() { mktemp -d "$BASH_LAMBDA_HEAP/${1:-gensym}_XXXXXXXXXXX"; }
 
-bash_lambda_sym() { bash_lambda_gc_guard "$(bash_lambda_gensym)"; }
-bash_lambda_dir() { bash_lambda_gc_guard "$(bash_lambda_gendir)"; }
+bash_lambda_sym() { bash_lambda_gc_guard "$(bash_lambda_gensym "$@")"; }
+bash_lambda_dir() { bash_lambda_gc_guard "$(bash_lambda_gendir "$@")"; }
 
 bash_lambda_gc_guard() {
   declare file=$1

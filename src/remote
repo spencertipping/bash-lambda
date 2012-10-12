@@ -1,0 +1,32 @@
+#!/bin/bash
+# Bash-lambda remote functions
+
+# Remote functions allow you to transparently migrate the execution of a
+# function to another machine. Any relevant heap state will be transferred
+# automatically. Remote functions use passwordless SSH and their stdin/stdout
+# and exit codes are transparently proxied.
+
+# Note that remote functions are run from the current $PWD, except that any
+# changes to $HOME are taken into account. For instance, if I'm spencertipping
+# on one computer and spencer on another, and I run this from ~/bin, then:
+#
+# $ remote the-spencertipping-machine $(fn 'echo $PWD')
+# /home/spencertipping/bin
+# $ remote the-spencer-machine $(fn 'echo $PWD')
+# /home/spencer/bin
+# $
+
+# If the remote command produces a nonzero exit code, then the heap snapshot is
+# preserved to help you find out what went wrong. You can get rid of old
+# snapshots on remote systems using remote_clean.
+
+bash_lambda_remote() {
+  declare host=$1 f=$2 cd_into=${PWD#$HOME/}
+  declare snapshot=$(bash_lambda_ref_snapshot $f)
+
+  ssh $host "cd $cd_into && tar -xzP && $f && rm -rf \"$BASH_LAMBDA_HEAP\"" \
+    < $snapshot; }
+
+bash_lambda_remote_clean() {
+  # Removes this instance's heap snapshot from the remote instance.
+  ssh $host "rm -rf \"$BASH_LAMBDA_HEAP\""; }

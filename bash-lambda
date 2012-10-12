@@ -33,8 +33,8 @@ export PATH="$PATH:$BASH_LAMBDA_HEAP"
 bash_lambda_gensym() { mktemp "$BASH_LAMBDA_HEAP/${1:-gensym}_XXXXXXXXXXXXXX"; }
 bash_lambda_gendir() { mktemp -d "$BASH_LAMBDA_HEAP/${1:-gensym}_XXXXXXXXXXX"; }
 
-bash_lambda_sym() { bash_lambda_gc_guard "$(bash_lambda_gensym)"; }
-bash_lambda_dir() { bash_lambda_gc_guard "$(bash_lambda_gendir)"; }
+bash_lambda_sym() { bash_lambda_gc_guard "$(bash_lambda_gensym "$@")"; }
+bash_lambda_dir() { bash_lambda_gc_guard "$(bash_lambda_gendir "$@")"; }
 
 bash_lambda_gc_guard() {
   declare file=$1
@@ -96,11 +96,15 @@ bash_lambda_ref_visit() {
     # Otherwise, mark the object and everything it points to.
     touch "$directory/$ref_name"; fi
 
+  # Can we inspect this ref? We shouldn't if it's a pipe; otherwise we'll block
+  # our process.
+  [[ -p "$ref" ]] && return 0
+
   # Make sure any recursive calls happen inside a subshell. Otherwise we'll
   # corrupt local variables.
   if [[ -d "$ref" ]]; then
-    ls -d "$ref"/* | (declare x; while read x; do
-                        bash_lambda_ref_visit "$directory" "$x"; done)
+    [[ -e "$ref"/* ]] && ls -d "$ref"/* | (declare x; while read x; do
+                           bash_lambda_ref_visit "$directory" "$x"; done)
   else
     # Search for other references in the child.
     bash_lambda_ref_children < "$ref" | (declare x
@@ -111,13 +115,9 @@ bash_lambda_ref_children() {
   # pseudorandom entropy, so we are unlikely to see it spuriously referenced.
   # If we observe a path that exists, then we consider that to be a reference
   # for GC purposes.
-  #
-  # Note that we don't consider FIFOs to be references. These are used by
-  # futures for locking, and if we tried to read from them we could stop the GC
-  # process.
 
   egrep -o "$BASH_LAMBDA_HEAP/[^ [:space:]/\)\}\"']+" | (declare ref
-    while read ref; do [[ -e "$ref" && ! -p "$ref" ]] && echo "$ref"; done); }
+    while read ref; do [[ -e "$ref" ]] && echo "$ref"; done); }
 
 # Bash-lambda concurrent mark-sweep garbage collector
 
@@ -208,6 +208,8 @@ bash_lambda_heap_stats() {
     'objects:'   $(ls "$BASH_LAMBDA_HEAP" | wc -l) \
     'permanent:' $(ls "$BASH_LAMBDA_HEAP/.gc-permanent" | wc -l); }
 
+bash_lambda_heap_ls() { ls "$BASH_LAMBDA_HEAP"; }
+
 bash_lambda_gc_pin()   { touch "$BASH_LAMBDA_HEAP/.gc-permanent/${1##*/}";
                          echo "$1"; }
 
@@ -266,7 +268,48 @@ bash_lambda_comp() {
   bash_lambda_fn "echo $body"; }
 
 bash_lambda_partial() {
-  bash_lambda_fn "exec $* \"\$@\""; }
+  bash_lambda_fn "$* \"\$@\""; }
+
+# Bash-lambda semaphores
+
+# Semaphores are directories that contain empty numbered subdirectories along
+# with an immutable file containing the capacity of the semaphore. Locking is
+# done by attempting to create one of these empty subdirectories, and ls -d |
+# wc -l is used to get the number of used entries.
+
+bash_lambda_semaphore() {
+  declare capacity=$1 semaphore=$(bash_lambda_dir semaphore)
+  echo $capacity > "$semaphore/capacity"
+  echo "$semaphore"; }
+
+bash_lambda_semaphore_take() {
+  # Take an item from the semaphore; returns the item's identifier (a path, but
+  # you don't need to know this) and exit code 0 if successful, returns 1 and
+  # outputs nothing if unsuccessful.
+  declare semaphore=$1 i
+  for (( i = 0; i < $(<"$semaphore/capacity"); i += 1 )); do
+    if mkdir "$semaphore/$i" >& /dev/null; then
+      echo "$semaphore/$i"; return 0; fi; done
+  return 1; }
+
+bash_lambda_semaphore_release() {
+  # Releases an item from the semaphore. You can just pass the item here; no
+  # need to pass the semaphore also.
+  rmdir "$1"; }
+
+bash_lambda_semaphore_count() {
+  # Counts the number of items available in the semaphore.
+  declare semaphore=$1
+  echo $(( $(<"$semaphore/capacity") + 1 - $(ls -d "$semaphore/"* | wc -l) )); }
+
+bash_lambda_semaphore_wrap() {
+  # Wraps a function's execution with a take/release of a semaphore item.
+  declare s=$1 f=$2
+  bash_lambda_fn "declare lock=\$(bash_lambda_semaphore_take $s) &&
+                  ($f \"\$@\"
+                   declare status=\$?
+                   bash_lambda_semaphore_release \$lock
+                   exit \$status)"; }
 
 # Bash-lambda multimethods
 
@@ -289,6 +332,17 @@ bash_lambda_partial() {
 bash_lambda_defmulti() {
   declare multi_name=$1
   bash_lambda_defn $1 '$(bash_lambda_ref_type $1)_'$multi_name' "$@"'; }
+
+# Multimethod definitions for bash-lambda functions
+# get finished  src/future
+# count         src/list src/semaphore
+# wrap          src/semaphore
+
+(declare method
+ for method in get finished \
+               count \
+               wrap; do
+   bash_lambda_defmulti $method; done) > /dev/null
 
 # Bash-lambda list programming constructs
 
@@ -319,6 +373,17 @@ bash_lambda_reductions() { declare f="$1" x="$2"
                            (declare y
                             while read y; do x="$($f "$x" "$y")"; echo "$x"
                             done); }
+
+bash_lambda_partition() { declare n=$1
+                          cat ${2:--} |
+                          while (declare i x xs=()
+                                 for (( i = 0; i < n; i += 1 )); do
+                                   read x && xs+=($x); done
+                                 x=$?
+                                 bash_lambda_list "${xs[@]}"
+                                 return $x); do :; done; }
+
+bash_lambda_list_count() { wc -l < "$1"; }
 
 # List generators
 bash_lambda_iterate() { declare x="$2"
@@ -382,14 +447,96 @@ bash_lambda_future_get() {
   return "$(< "$(bash_lambda_nth 1 "$1")")"; }
 
 bash_lambda_future_transpose() {
-  # transpose list of futures = future of list
-  declare filename=$1
   bash_lambda_future $(bash_lambda_partial \
-    bash_lambda_map bash_lambda_future_get $filename); }
+    bash_lambda_map bash_lambda_future_get $1); }
 
-bash_lambda_defmulti finished  > /dev/null
-bash_lambda_defmulti get       > /dev/null
-bash_lambda_defmulti transpose > /dev/null
+# Bash-lambda remote functions
+
+# Remote functions allow you to transparently migrate the execution of a
+# function to another machine. Any relevant heap state will be transferred
+# automatically. Remote functions use passwordless SSH and their stdin/stdout
+# and exit codes are transparently proxied.
+
+# Note that remote functions are run from the current $PWD, except that any
+# changes to $HOME are taken into account. For instance, if I'm spencertipping
+# on one computer and spencer on another, and I run this from ~/bin, then:
+#
+# $ remote the-spencertipping-machine $(fn 'echo $PWD')
+# /home/spencertipping/bin
+# $ remote the-spencer-machine $(fn 'echo $PWD')
+# /home/spencer/bin
+# $
+
+# If the remote command produces a nonzero exit code, then the heap snapshot is
+# preserved to help you find out what went wrong. You can get rid of old
+# snapshots on remote systems using remote_clean.
+
+bash_lambda_remote() {
+  declare host=$1 f=$2 cd_into=${PWD#$HOME/}
+  declare snapshot=$(bash_lambda_ref_snapshot $f)
+
+  ssh $host "cd $cd_into && tar -xzP && $f && rm -rf \"$BASH_LAMBDA_HEAP\"" \
+    < $snapshot; }
+
+bash_lambda_remote_clean() {
+  # Removes this instance's heap snapshot from the remote instance.
+  ssh $host "rm -rf \"$BASH_LAMBDA_HEAP\""; }
+
+# Bash-lambda wait functions
+
+# Various ways to wait for things. Usually you would use this with semaphores,
+# but you could do it with any function.
+
+bash_lambda_poll_constantly()    { echo $1; }
+bash_lambda_poll_linearly()      { bash_lambda_fn "echo \$((\$1 + ${1:-1}))"; }
+bash_lambda_poll_exponentially() { bash_lambda_fn "echo \$((\$1 * ${1:-2}))"; }
+
+bash_lambda_waiting_fn() {
+  # Returns a thunk that waits for the given function to return true, polling
+  # constantly by default (you can change this by passing a polling interval
+  # function as the third argument). Echoes all output from the function. The
+  # second argument specifies the initial polling duration.
+  declare f=$1 delay=${2:-1} adjust=${3:-bash_lambda_poll_constantly}
+  bash_lambda_fn "declare delay=$delay
+                  until $f \"\$@\"; do sleep \$delay
+                    delay=\$($adjust \$delay); done"; }
+
+# Bash-lambda parallel execution
+
+# Parallel tasks are defined as an interface that transposes parallelism over
+# lists. They generally return futures. You should set the
+# BASH_LAMBDA_PARALLELISM value to something more specific to your own system,
+# depending on available CPUs and memory.
+#
+# There is a considerable degree of overhead (on the order of seconds)
+# associated with using these parallel methods.
+
+export BASH_LAMBDA_PARALLELISM=4
+
+bash_lambda_parallel_map() {
+  # Maps a function over a list in parallel. Results retain their original
+  # order. An optional third parameter allows you to override the default level
+  # of parallelism.
+
+  # This function returns a list of futures, each of which represents an
+  # intermediate outcome. The futures are generated lazily, so in theory you
+  # could have an infinite source list and, so long as you requested only a
+  # finite number of elements, you would be ok. (In practice, I think this is a
+  # dangerous strategy.) To get the completed results for a segment of the
+  # list:
+  #
+  # $ get $(transpose $(list $(parallel_map $f $xs | take 5)))
+
+  # Note: If your function returns a nonzero exit code, it will be run again on
+  # the same data.
+
+  declare f=$1 xs=$2 n=${3:-$BASH_LAMBDA_PARALLELISM}
+  declare s=$(bash_lambda_semaphore $n)
+
+  declare blocking_f=$(bash_lambda_waiting_fn \
+                        $(bash_lambda_semaphore_wrap $s $f))
+
+  bash_lambda_map $(bash_lambda_partial bash_lambda_future $blocking_f) $xs; }
 
 # Bash-lambda function exporting and GC hooks
 

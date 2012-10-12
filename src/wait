@@ -1,0 +1,19 @@
+#!/bin/bash
+# Bash-lambda wait functions
+
+# Various ways to wait for things. Usually you would use this with semaphores,
+# but you could do it with any function.
+
+bash_lambda_poll_constantly()    { echo $1; }
+bash_lambda_poll_linearly()      { bash_lambda_fn "echo \$((\$1 + ${1:-1}))"; }
+bash_lambda_poll_exponentially() { bash_lambda_fn "echo \$((\$1 * ${1:-2}))"; }
+
+bash_lambda_waiting_fn() {
+  # Returns a thunk that waits for the given function to return true, polling
+  # constantly by default (you can change this by passing a polling interval
+  # function as the third argument). Echoes all output from the function. The
+  # second argument specifies the initial polling duration.
+  declare f=$1 delay=${2:-1} adjust=${3:-bash_lambda_poll_constantly}
+  bash_lambda_fn "declare delay=$delay
+                  until $f \"\$@\"; do sleep \$delay
+                    delay=\$($adjust \$delay); done"; }

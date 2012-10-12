@@ -41,11 +41,15 @@ bash_lambda_ref_visit() {
     # Otherwise, mark the object and everything it points to.
     touch "$directory/$ref_name"; fi
 
+  # Can we inspect this ref? We shouldn't if it's a pipe; otherwise we'll block
+  # our process.
+  [[ -p "$ref" ]] && return 0
+
   # Make sure any recursive calls happen inside a subshell. Otherwise we'll
   # corrupt local variables.
   if [[ -d "$ref" ]]; then
-    ls -d "$ref"/* | (declare x; while read x; do
-                        bash_lambda_ref_visit "$directory" "$x"; done)
+    [[ -e "$ref"/* ]] && ls -d "$ref"/* | (declare x; while read x; do
+                           bash_lambda_ref_visit "$directory" "$x"; done)
   else
     # Search for other references in the child.
     bash_lambda_ref_children < "$ref" | (declare x
@@ -56,10 +60,6 @@ bash_lambda_ref_children() {
   # pseudorandom entropy, so we are unlikely to see it spuriously referenced.
   # If we observe a path that exists, then we consider that to be a reference
   # for GC purposes.
-  #
-  # Note that we don't consider FIFOs to be references. These are used by
-  # futures for locking, and if we tried to read from them we could stop the GC
-  # process.
 
   egrep -o "$BASH_LAMBDA_HEAP/[^ [:space:]/\)\}\"']+" | (declare ref
-    while read ref; do [[ -e "$ref" && ! -p "$ref" ]] && echo "$ref"; done); }
+    while read ref; do [[ -e "$ref" ]] && echo "$ref"; done); }

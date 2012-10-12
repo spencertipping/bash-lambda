@@ -12,4 +12,4 @@ bash_lambda_comp() {
   bash_lambda_fn "echo $body"; }
 
 bash_lambda_partial() {
-  bash_lambda_fn "exec $* \"\$@\""; }
+  bash_lambda_fn "$* \"\$@\""; }
