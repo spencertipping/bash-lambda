@@ -3,6 +3,9 @@
 
 bash_lambda_list() { declare x
                      for x; do echo "$x"; done | bash_lambda_cons list; }
+
+bash_lambda_nth()  { cat ${2:--} | head -n$(($1 + 1)) | tail -n1; }
+
 bash_lambda_take() { cat ${2:--} | head -n$1; }
 bash_lambda_drop() { cat ${2:--} | (declare i
                                     for (( i = 0; i < $1; i += 1 )); do

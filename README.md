@@ -21,17 +21,6 @@ $ git clone git://github.com/spencertipping/bash-lambda
 $ source bash-lambda/bash-lambda
 ```
 
-## Motivational examples
-
-### Find broken symlinks
-
-```
-$ broken_symlink=$(fn f '[[ ! -e "$f" ]]')
-$ ls -d /etc/* | filter $broken_symlink
-/etc/blkid.tab
-$
-```
-
 ## Defining functions
 
 The functions provided by bash-lambda take their nomenclature from Clojure, and
@@ -258,9 +247,8 @@ Here we're closing over the current value of `$sum_list` and emulating
 Lisp-style quasiquoting by deliberately escaping everything else. (Well, with a
 good bit of bash mixed in.)
 
-The easier way is to make the 'average' function visible within closures by
-giving it a name. While we're at it, let's do the same for `sum_list`; that way
-we won't need to close over `$sum_list` and escape a bunch of variables.
+The easier way is to make the 'sum_list' function visible within closures by
+giving it a name. While we're at it, let's do the same for `average`.
 
 ```
 $ def sum-list $sum_list
@@ -398,9 +386,15 @@ objects to be collected when they shouldn't. So far these cases are:
 1. The window of time between parameter substitution and command invocation.
    Allocations made by those parameter substitutions will be live but may be
    collected anyway since they are not visible in the process table.
-2. By extension, any commands that have delayed parts:
-   `sleep 10; map $(fn ...) $xs`. We can't read the memory of the bash process,
-   so we won't be able to know whether the `$(fn)` is still in the live set.
+2. ~~By extension, any commands that have delayed parts:~~
+   ~~`sleep 10; map $(fn ...) $xs`. We can't read the memory of the bash~~
+   ~~process, so we won't be able to know whether the `$(fn)` is still in the~~
+   ~~live set.~~
+   This is incorrect. Based on some tests I ran, `$()` expressions inside
+   delayed commands are evaluated only once the delayed commands are.
+   Therefore, the only cause of pathological delays would be something like
+   this: `cat $(fn 'echo hi'; sleep 10)`, which would delay the visibility of
+   the `$(fn)` form.
 
 Bash-lambda does its best to work around these problems, but there may still be
 edge cases. See `src/gc` for a full discussion of these issues, and please let
