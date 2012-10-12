@@ -503,10 +503,10 @@ objects to be collected when they shouldn't. So far these cases are:
 1. The window of time between parameter substitution and command invocation.
    Allocations made by those parameter substitutions will be live but may be
    collected anyway since they are not visible in the process table.
-2. ~~By extension, any commands that have delayed parts:~~
-   `sleep 10; map $(fn ...) $xs`.~~ We can't read the memory of the bash~~
-   ~~process, so we won't be able to know whether the `$(fn)` is still in the~~
-   ~~live set.~~
+2. ~~By extension, any commands that have delayed parts:
+   `sleep 10; map $(fn ...) $xs`. We can't read the memory of the bash
+   process, so we won't be able to know whether the `$(fn)` is still in the
+   live set.~~
    This is incorrect. Based on some tests I ran, `$()` expressions inside
    delayed commands are evaluated only once the delayed commands are.
    Therefore, the only cause of pathological delays would be something like
