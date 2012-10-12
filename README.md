@@ -1,8 +1,9 @@
 # Bash lambda
 
 Real lambda support for bash (a functionally complete hack). Includes a set of
-functions for functional programming, list allocation and traversal, and
-concurrent mark/sweep garbage collection with weak reference support.
+functions for functional programming, list allocation and traversal, futures,
+closure serialization, and concurrent mark/sweep garbage collection with weak
+reference support.
 
 ## NOTE
 
