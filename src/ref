@@ -18,6 +18,8 @@ bash_lambda_ref_closure() {
   ls -d "$visited"/* | (declare x; while read x; do
     echo "$BASH_LAMBDA_HEAP/${x##$visited/}"; done); }
 
+bash_lambda_ref_type() { declare base=${1##*/}; echo "${base%%_*}"; }
+
 bash_lambda_ref_visit() {
   # The ref in question must be an object that exists in the heap. We expect it
   # to be a full pathname, though the object itself should be a direct child of

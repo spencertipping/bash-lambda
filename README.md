@@ -297,7 +297,7 @@ executes another function and allows you to monitor its status:
 
 ```
 $ f=$(future $(fn 'sleep 10; echo hi'))
-$ future_done $f || echo waiting
+$ future_finished $f || echo waiting
 waiting
 $ time future_get $f
 hi
@@ -317,7 +317,7 @@ You can transpose a list of futures into a future of a list using
 $ f=$(fn 'sleep 10; echo $RANDOM')
 $ futures=$(list $(repeatedly $(partial future $f) 10))
 $ single=$(future_transpose $futures)
-$ future_done $single || echo waiting
+$ future_finished $single || echo waiting
 waiting
 $ future_get $single    # takes a moment
 21297
@@ -334,6 +334,9 @@ $
 ```
 
 The resulting list is order-preserving.
+
+Both `future_finished` and `future_get` are implemented as multimethods, so you
+can simply use `finished` and `get` instead.
 
 ## References and garbage collection
 

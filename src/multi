@@ -1,0 +1,22 @@
+#!/bin/bash
+# Bash-lambda multimethods
+
+# These work only on fully-named parameters, not on stuff coming from stdin. If
+# we can observe the name, then we can extract the type from the beginning of
+# the filename. For example:
+#
+# $ future $f
+# /tmp/blheap-xxxx-xxxx/future_xxxxxxxx
+# $ ref_type $(future $f)
+# future
+# $
+#
+# We then prepend this to the multimethod name to get the specific function
+# name:
+#
+# $ defmulti get
+# $ get $(future $f)   -> future_get $(future $f)
+
+bash_lambda_defmulti() {
+  declare multi_name=$1
+  bash_lambda_defn $1 '$(bash_lambda_ref_type $1)_'$multi_name' "$@"'; }

@@ -73,6 +73,8 @@ bash_lambda_ref_closure() {
   ls -d "$visited"/* | (declare x; while read x; do
     echo "$BASH_LAMBDA_HEAP/${x##$visited/}"; done); }
 
+bash_lambda_ref_type() { declare base=${1##*/}; echo "${base%%_*}"; }
+
 bash_lambda_ref_visit() {
   # The ref in question must be an object that exists in the heap. We expect it
   # to be a full pathname, though the object itself should be a direct child of
@@ -266,6 +268,28 @@ bash_lambda_comp() {
 bash_lambda_partial() {
   bash_lambda_fn "exec $* \"\$@\""; }
 
+# Bash-lambda multimethods
+
+# These work only on fully-named parameters, not on stuff coming from stdin. If
+# we can observe the name, then we can extract the type from the beginning of
+# the filename. For example:
+#
+# $ future $f
+# /tmp/blheap-xxxx-xxxx/future_xxxxxxxx
+# $ ref_type $(future $f)
+# future
+# $
+#
+# We then prepend this to the multimethod name to get the specific function
+# name:
+#
+# $ defmulti get
+# $ get $(future $f)   -> future_get $(future $f)
+
+bash_lambda_defmulti() {
+  declare multi_name=$1
+  bash_lambda_defn $1 '$(bash_lambda_ref_type $1)_'$multi_name' "$@"'; }
+
 # Bash-lambda list programming constructs
 
 bash_lambda_list() { declare x
@@ -343,7 +367,7 @@ bash_lambda_future() {
   ("$@" > $output; echo $? > $exit_code; echo > $fifo; rm $fifo) >& /dev/null &
   printf $"%s\n%s\n%s" $output $exit_code $fifo | bash_lambda_cons future; }
 
-bash_lambda_future_done() {
+bash_lambda_future_complete() {
   # Exits with 0 if the future is finished, 1 if still running. If 0, a
   # future_get call will block only on IO, but not on job completion.
   [[ -s "$(bash_lambda_nth 1 "$1")" ]]; }
@@ -352,7 +376,8 @@ bash_lambda_future_get() {
   # This function blocks on the future's process if it is still running, and
   # its stdout and exit code are proxied.
 
-  bash_lambda_future_done "$1" || cat "$(bash_lambda_nth 2 "$1")" >& /dev/null
+  bash_lambda_future_complete "$1" ||
+    cat "$(bash_lambda_nth 2 "$1")" >& /dev/null
   cat "$(bash_lambda_nth 0 "$1")"
   return "$(< "$(bash_lambda_nth 1 "$1")")"; }
 
@@ -361,6 +386,9 @@ bash_lambda_future_transpose() {
   declare filename=$1
   bash_lambda_future $(bash_lambda_partial \
     bash_lambda_map bash_lambda_future_get $filename); }
+
+bash_lambda_defmulti complete > /dev/null
+bash_lambda_defmulti get      > /dev/null
 
 # Bash-lambda function exporting and GC hooks
 
