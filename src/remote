@@ -24,8 +24,11 @@ bash_lambda_remote() {
   declare host=$1 f=$2 cd_into=${PWD#$HOME/}
   declare snapshot=$(bash_lambda_ref_snapshot $f)
 
-  ssh $host "cd $cd_into && tar -xzP && $f && rm -rf \"$BASH_LAMBDA_HEAP\"" \
-    < $snapshot; }
+  declare path="export PATH=\"\$PATH:$BASH_LAMBDA_HEAP\""
+  declare pre="cd $cd_into && tar xzP"
+  declare clean="rm -rf \"$BASH_LAMBDA_HEAP\""
+
+  ssh $host "$pre && $path && $f && $clean" < $snapshot; }
 
 bash_lambda_remote_clean() {
   # Removes this instance's heap snapshot from the remote instance.

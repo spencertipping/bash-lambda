@@ -3,7 +3,9 @@
 
 bash_lambda_ref() {
   # Returns a reference to something in the heap. A reference is a function
-  # that, when run, echoes the thing it refers to.
+  # that, when run, echoes the thing it refers to. You need to create refs to
+  # point to heap objects if you can't expose variables (from ~/.bash-lambda,
+  # for example).
   bash_lambda_fn "echo $1"; }
 
 # A weak reference is a path that resolves the same way as a regular path, but
@@ -12,13 +14,17 @@ bash_lambda_ref() {
 bash_lambda_weak_ref() {
   echo "$BASH_LAMBDA_HEAP/.weak-references/${1##$BASH_LAMBDA_HEAP/}"; }
 
+bash_lambda_ref_resolve() {
+  if [[ -e "$BASH_LAMBDA_HEAP/$1" ]]; then echo "$BASH_LAMBDA_HEAP/$1"
+  else                                     echo "$r"; fi; }
+
 bash_lambda_ref_snapshot() {
   tar -czP $(bash_lambda_ref_closure "$1") | bash_lambda_cons snapshot; }
 
 bash_lambda_ref_intern() { cat ${1:--} | tar -xzP; }
 
 bash_lambda_ref_closure() {
-  declare visited=$(bash_lambda_dir) object=$1
+  declare visited=$(bash_lambda_dir) object=$(bash_lambda_ref_resolve "$1")
   bash_lambda_ref_visit "$visited" "$object"
   ls -d "$visited"/* | (declare x; while read x; do
     echo "$BASH_LAMBDA_HEAP/${x##$visited/}"; done); }
@@ -33,7 +39,7 @@ bash_lambda_ref_visit() {
   declare ref_name="${ref#$BASH_LAMBDA_HEAP/}"
 
   # Is this something that belongs to the GC?
-  [[ "$ref_name" == ".gc-marked-set" ||
+  [[ "$ref_name" == ".gc-marked-set"  ||
      "$ref_name" == ".gc-visited-set" ]] && return 0
 
   # No need to mark an object in a subdirectory. It isn't a direct child of the
@@ -52,10 +58,10 @@ bash_lambda_ref_visit() {
 bash_lambda_ref_read() {
   # Read the contents of the given object. The result will be an output stream
   # suitable for consumption by bash_lambda_ref_children.
-  if   [[ -d "$ref" ]]; then [[ -e "$ref"/* ]] && ls -d "$ref"/*
-  elif [[ -L "$ref" ]]; then readlink "$ref"
-  elif [[ -p "$ref" ]]; then return 0
-  else                       cat "$ref"; fi; }
+  if   [[ -d "$1" ]]; then [[ -e "$1"/* ]] && ls -d "$1"/*
+  elif [[ -L "$1" ]]; then readlink "$1"
+  elif [[ -p "$1" ]]; then return 0
+  elif [[ -e "$1" ]]; then cat "$1"; fi; }
 
 bash_lambda_ref_children() {
   # Locate occurrences of the heap directory. This name contains 128 bits of
