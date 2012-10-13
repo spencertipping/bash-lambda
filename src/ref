@@ -1,6 +1,11 @@
 #!/bin/bash
 # Bash-lambda reference functions
 
+bash_lambda_ref() {
+  # Returns a reference to something in the heap. A reference is a function
+  # that, when run, echoes the thing it refers to.
+  bash_lambda_fn "echo $1"; }
+
 # A weak reference is a path that resolves the same way as a regular path, but
 # that isn't followed by the garbage collector. src/heap sets up a symlink for
 # this purpose.

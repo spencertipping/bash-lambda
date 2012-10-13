@@ -527,7 +527,8 @@ other-machine$ original-heap-name/f
 Notice that you'll need to communicate not only the function's data but also
 its name; `ref_snapshot` and `ref_intern` are low-level functions that aren't
 designed to be used directly for remoting (though they probably do most of the
-work).
+work). The `remote` function uses `ref_snapshot` under the hood and takes care
+of most of the details of running stuff remotely.
 
 ### Inspecting heap state
 
@@ -589,6 +590,9 @@ You can use an analogous function, unpin, to remove something's pinned status:
 ```
 $ f=$(gc_unpin $pinned_function)
 ```
+
+(`gc_pin` and `gc_unpin` return the value you give them for convenience, but
+side-effectfully change its status within the garbage collector)
 
 ### Weak references
 

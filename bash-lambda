@@ -56,6 +56,11 @@ bash_lambda_cons() {
 
 # Bash-lambda reference functions
 
+bash_lambda_ref() {
+  # Returns a reference to something in the heap. A reference is a function
+  # that, when run, echoes the thing it refers to.
+  bash_lambda_fn "echo $1"; }
+
 # A weak reference is a path that resolves the same way as a regular path, but
 # that isn't followed by the garbage collector. src/heap sets up a symlink for
 # this purpose.
@@ -643,13 +648,53 @@ bash_lambda_parallel_map() {
 
 # Bash-lambda function exporting and GC hooks
 
+export BASH_LAMBDA_RC=${BASH_LAMBDA_RC:-$HOME/.bash-lambda}
+export BASH_LAMBDA_EDITOR=${BASH_LAMBDA_EDITOR:-${EDITOR:-$VISUAL}}
+
 # Export the bash_lambda library into the current heap
 bash_lambda_init() {
   declare -f | grep '^bash_lambda' | sed 's/ .*//' |
   (declare fn; while read fn; do
     bash_lambda_extern $fn > /dev/null
     if [[ -z "$BASH_LAMBDA_NO_ALIASES" ]]; then
-      bash_lambda_def ${fn##bash_lambda_} $fn; fi; done) & }
+      bash_lambda_def ${fn##bash_lambda_} $fn; fi; done
+
+   bash_lambda_reload_rc
+   bash_lambda_message 'λ') & }
+
+bash_lambda_message() {
+  declare m="$*"
+  (( $COLUMNS )) && echo -en "\033[s\033[$((COLUMNS - ${#m}))G$m\033[u"; }
+
+bash_lambda_setup_rc() {
+  [[ -e "$BASH_LAMBDA_RC" ]] || sed 's/^  //' > "$BASH_LAMBDA_RC" \
+  <<<"#!/bin/bash
+  # You can put function defs here. Variables you define here aren't visible,
+  # since this file is always evaluated (usually asynchronously) from inside a
+  # subshell.
+  #
+  # This file is sourced asynchronously when you start your shell, so adding
+  # definitions won't increase the amount of time required to open a new
+  # terminal.
+  #
+  # See https://github.com/spencertipping/bash-lambda for details about
+  # defining functions.
+  #
+  # Examples:
+  #
+  # def my-computers \$(list host1 host2 host3)
+  # defn check-status 'hostname; df -h | grep  /$; uptime'
+  # defn check-computers 'map \$(partial remote check-status)'
+  #
+  "; }
+
+bash_lambda_reload_rc() {
+  [[ -e "$BASH_LAMBDA_RC" ]] && (. "$BASH_LAMBDA_RC" > /dev/null); }
+
+bash_lambda_defs() {
+  bash_lambda_setup_rc
+  $BASH_LAMBDA_EDITOR "$BASH_LAMBDA_RC"
+  (bash_lambda_reload_rc &); }
 
 (bash_lambda_init)
 
