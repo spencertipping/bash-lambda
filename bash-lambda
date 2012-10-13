@@ -208,7 +208,7 @@ bash_lambda_heap_stats() {
     'objects:'   $(ls "$BASH_LAMBDA_HEAP" | wc -l) \
     'permanent:' $(ls "$BASH_LAMBDA_HEAP/.gc-permanent" | wc -l); }
 
-bash_lambda_heap_ls() { ls "$BASH_LAMBDA_HEAP"; }
+bash_lambda_heap_ls() { cd "$BASH_LAMBDA_HEAP"; ls "$@"; }
 
 bash_lambda_gc_pin()   { touch "$BASH_LAMBDA_HEAP/.gc-permanent/${1##*/}";
                          echo "$1"; }
