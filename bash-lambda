@@ -84,7 +84,7 @@ bash_lambda_ref_visit() {
   # The ref in question must be an object that exists in the heap. We expect it
   # to be a full pathname, though the object itself should be a direct child of
   # the heap directory.
-  declare directory="$1" ref="$2"
+  declare directory=$1 ref=$2
   declare ref_name="${ref#$BASH_LAMBDA_HEAP/}"
 
   # Is this something that belongs to the GC?
@@ -218,7 +218,9 @@ bash_lambda_gc_pin()   { touch "$BASH_LAMBDA_HEAP/.gc-permanent/${1##*/}";
 bash_lambda_gc_unpin() { rm -f "$BASH_LAMBDA_HEAP/.gc-permanent/${1##*/}";
                          echo "$1"; }
 
-bash_lambda_gc_roots() { declare; ps ax; }
+bash_lambda_gc_roots() {
+  declare; ps ax; ls -d "$BASH_LAMBDA_HEAP/.gc-permanent"/* | (declare x
+    while read x; do echo "$BASH_LAMBDA_HEAP/${x##*/}"; done); }
 
 # Bash-lambda function and closure allocation
 

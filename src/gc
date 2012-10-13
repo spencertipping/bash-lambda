@@ -96,4 +96,6 @@ bash_lambda_gc_pin()   { touch "$BASH_LAMBDA_HEAP/.gc-permanent/${1##*/}";
 bash_lambda_gc_unpin() { rm -f "$BASH_LAMBDA_HEAP/.gc-permanent/${1##*/}";
                          echo "$1"; }
 
-bash_lambda_gc_roots() { declare; ps ax; }
+bash_lambda_gc_roots() {
+  declare; ps ax; ls -d "$BASH_LAMBDA_HEAP/.gc-permanent"/* | (declare x
+    while read x; do echo "$BASH_LAMBDA_HEAP/${x##*/}"; done); }

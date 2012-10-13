@@ -29,7 +29,7 @@ bash_lambda_ref_visit() {
   # The ref in question must be an object that exists in the heap. We expect it
   # to be a full pathname, though the object itself should be a direct child of
   # the heap directory.
-  declare directory="$1" ref="$2"
+  declare directory=$1 ref=$2
   declare ref_name="${ref#$BASH_LAMBDA_HEAP/}"
 
   # Is this something that belongs to the GC?
