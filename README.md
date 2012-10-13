@@ -5,6 +5,8 @@ functions for functional programming, list allocation and traversal, futures,
 complete closure serialization, remote closure execution, multimethods, and
 concurrent mark/sweep garbage collection with weak reference support.
 
+MIT license as usual.
+
 ## NOTE
 
 *This library is experimental.* Don't use it for mission-critical applications,

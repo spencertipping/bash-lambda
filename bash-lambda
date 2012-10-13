@@ -431,59 +431,51 @@ bash_lambda_list() { declare x
 bash_lambda_nth()  { cat ${2:--} | head -n$(($1 + 1)) | tail -n1; }
 
 bash_lambda_take() { cat ${2:--} | head -n$1; }
-bash_lambda_drop() { cat ${2:--} | (declare i
-                                    for (( i = 0; i < $1; i += 1 )); do
-                                      read x; done; cat -); }
+bash_lambda_drop() { cat ${2:--} | (head -n$1 > /dev/null; cat -); }
 
 # Here, 'map' works as both map and mapcat since cons and append are the same
 # operation. This arises due to the associativity of cons.
-bash_lambda_map()    { cat ${2:--} | (declare x
-                                      while read x; do $1 "$x"; done); }
-bash_lambda_reduce() { declare f="$1" x="$2"
-                       cat ${3:--} | (declare y
-                                      while read y; do x="$($f "$x" "$y")"; done
-                                      echo "$x"); }
-bash_lambda_filter() { cat ${2:--} |
-                       (declare x; while read x; do
-                                     $1 "$x" > /dev/null && echo "$x"; done); }
+bash_lambda_map() {
+  cat ${2:--} | (declare x; while read x; do $1 "$x"; done); }
 
-bash_lambda_reductions() { declare f="$1" x="$2"
-                           cat ${3:--} |
-                           (declare y
-                            while read y; do x="$($f "$x" "$y")"; echo "$x"
+bash_lambda_reduce() {
+  declare f=$1 x=$2
+  cat ${3:--} | (declare y; while read y; do x="$($f "$x" "$y")"; done
+                            echo "$x"); }
+
+bash_lambda_reductions() {
+  declare f=$1 x=$2
+  cat ${3:--} | (declare y; while read y; do x="$($f "$x" "$y")"; echo "$x"
                             done); }
 
-bash_lambda_partition() { declare n=$1
-                          cat ${2:--} |
-                          while (declare i x xs=()
-                                 for (( i = 0; i < n; i += 1 )); do
-                                   read x && xs+=($x); done
-                                 x=$?
-                                 bash_lambda_list "${xs[@]}"
-                                 return $x); do :; done; }
+bash_lambda_filter() {
+  cat ${2:--} | (declare x; while read x; do
+                            $1 "$x" > /dev/null && echo "$x"; done); }
+
+bash_lambda_partition() {
+  cat ${2:--} | split -l $1 -u --filter='bash_lambda_cons list'; }
 
 bash_lambda_list_count() { wc -l < "$1"; }
 
 # List generators
-bash_lambda_iterate() { declare x="$2"
-                        echo "$x"; while x="$($1 "$x")"; do echo "$x"; done; }
+bash_lambda_iterate() {
+  declare x=$2
+  echo "$x"; while x="$($1 "$x")"; do echo "$x"; done; }
 
-bash_lambda_repeatedly() { declare i f="$1" n="$2"
-                           for (( i = 0; i != ${n:--1}; i += 1 )); do
-                             $f || return $?; done; }
+bash_lambda_repeatedly() {
+  declare i f=$1 n=$2
+  for (( i = 0; i != ${n:--1}; i += 1 )); do $f || return $?; done; }
 
 # Tests over lists
-bash_lambda_some() { cat ${2:--} |
-                     (declare x; while read x; do
-                       if $1 "$x" > /dev/null; then
-                         echo "$x"; return 0; fi; done
-                      return 1); }
+bash_lambda_some() {
+  cat ${2:--} | (declare x; while read x; do
+                   if $1 "$x" > /dev/null; then
+                     echo "$x"; return 0; fi; done; return 1); }
 
-bash_lambda_every() { cat ${2:--} |
-                      (declare x; while read x; do
-                        if ! $1 "$x" > /dev/null; then
-                          echo "$x"; return 1; fi; done
-                       return 0); }
+bash_lambda_every() {
+  cat ${2:--} | (declare x; while read x; do
+                  if ! $1 "$x" > /dev/null; then
+                    echo "$x"; return 1; fi; done; return 0); }
 
 # Bash-lambda futures (asynchronous processes)
 
