@@ -31,6 +31,9 @@ bash_lambda_filter() {
 bash_lambda_partition() {
   cat ${2:--} | split -l $1 -u --filter='bash_lambda_cons list'; }
 
+# This is a multimethod that is normally invoked as just 'count'; e.g:
+# $ count $(list 1 2 3)
+# If you want to count lines from a stream, you should use wc -l instead.
 bash_lambda_list_count() { wc -l < "$1"; }
 
 # List generators

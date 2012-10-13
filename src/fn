@@ -29,7 +29,8 @@ bash_lambda_defn() { declare name=$1; shift
 # each other from inside heap-allocated closures. Any exported functions are
 # pinned so that they will never be garbage-collected.
 bash_lambda_extern() {
-  bash_lambda_gc_pin $( (echo "$1_main() {"
+  bash_lambda_gc_pin $( (echo "#!/bin/bash"
+                         echo "$1_main() {"
                          declare -f "$1" | grep '^  '
                          echo "}"
                          echo "$1_main \"\$@\"") | bash_lambda_cons -n $1); }
