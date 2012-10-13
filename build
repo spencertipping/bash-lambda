@@ -3,7 +3,8 @@
  for file in heap ref gc fn fp multi \
              pipelock semaphore atom \
              list \
-             future remote wait parallel init; do
+             future remote wait parallel \
+             rc init; do
   cat src/$file | grep -v '^#!'
   echo; done) > bash-lambda
 

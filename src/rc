@@ -1,0 +1,39 @@
+#!/bin/bash
+# Bash-lambda rc file functions
+
+export BASH_LAMBDA_RC=${BASH_LAMBDA_RC:-$HOME/.bash-lambda}
+export BASH_LAMBDA_EDITOR=${BASH_LAMBDA_EDITOR:-${EDITOR:-$VISUAL}}
+
+bash_lambda_message() {
+  declare m="$*"
+  (( $COLUMNS )) && echo -en "\033[s\033[$((COLUMNS - ${#m}))G$m\033[u"; }
+
+bash_lambda_setup_rc() {
+  [[ -e "$BASH_LAMBDA_RC" ]] || sed 's/^  //' > "$BASH_LAMBDA_RC" \
+  <<<"#!/bin/bash
+  # You can put function defs here. Variables you define here aren't visible,
+  # since this file is always evaluated (usually asynchronously) from inside a
+  # subshell.
+  #
+  # This file is sourced asynchronously when you start your shell, so adding
+  # definitions won't increase the amount of time required to open a new
+  # terminal.
+  #
+  # See https://github.com/spencertipping/bash-lambda for details about
+  # defining functions.
+  #
+  # Examples:
+  #
+  # def my-computers \$(list host1 host2 host3)
+  # defn check-status 'hostname; df -h | grep  /$; uptime'
+  # defn check-computers 'map \$(partial remote check-status)'
+  #
+  "; }
+
+bash_lambda_reload_rc() {
+  [[ -e "$BASH_LAMBDA_RC" ]] && (. "$BASH_LAMBDA_RC" > /dev/null); }
+
+bash_lambda_defs() {
+  bash_lambda_setup_rc
+  $BASH_LAMBDA_EDITOR "$BASH_LAMBDA_RC"
+  (bash_lambda_reload_rc &); }
