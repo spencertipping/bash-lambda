@@ -10,10 +10,17 @@ MIT license as usual.
 ## Getting started
 
 Load the library into your shell (the `source` line can go into .bashrc):
+
 ```
 $ git clone git://github.com/spencertipping/bash-lambda
 $ source bash-lambda/bash-lambda
 ```
+
+Loading the library takes very little time even though a new heap is created
+for every process. This is because the heap setup and sourcing of your
+`.bash-lambda` file (run `defs` to edit it) is all done asynchronously. When
+the background initialization is complete, a small `λ` will appear in the
+rightmost column of your window.
 
 ## Defining functions
 
