@@ -7,15 +7,6 @@ concurrent mark/sweep garbage collection with weak reference support.
 
 MIT license as usual.
 
-## NOTE
-
-*This library is experimental.* Don't use it for mission-critical applications,
-important data storage, etc. It's obviously a huge hack and may malfunction in
-any number of awkward ways. None of these should impact the integrity of the
-rest of your data (I source this library in my `.bashrc` and nothing bad has
-happened yet), but it probably wouldn't hurt to glance over the source code
-before using it, just in case.
-
 ## Getting started
 
 Load the library into your shell (the `source` line can go into .bashrc):
