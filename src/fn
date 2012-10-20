@@ -3,11 +3,14 @@
 
 bash_lambda_fn_body() {
   echo '#!/bin/bash'
+  declare name=$(bash_lambda_genkey)
+  echo "$name() {"
   declare i
   for (( i = 1; i <= $#; i += 1 )); do
     if (( $i < $# )); then echo "declare -r ${!i}=\$$i"
-    else                   echo "${!i}"; fi
-  done; }
+    else                   echo "${!i}"; fi; done
+  echo "}"
+  echo "$name \"\$@\""; }
 
 bash_lambda_fn() {
   # Yup, we're allocating closures by writing to files and returning their
@@ -19,21 +22,9 @@ bash_lambda_fn() {
 bash_lambda_cons_fn() {
   # Same as bash_lambda_fn, but body is specified from stdin. Useful for
   # multiline functions when used with heredocs.
-  (bash_lambda_fn_body "$@" ''; cat -) | bash_lambda_cons fn; }
+  (bash_lambda_fn_body "$@" "$(cat -)") | bash_lambda_cons fn; }
 
-bash_lambda_defn() { declare name=$1; shift
-                     bash_lambda_gc_pin \
-                      $(bash_lambda_fn_body "$@" | bash_lambda_cons -n $name); }
-
-# Exports functions into named files in the heap. This allows them to reference
-# each other from inside heap-allocated closures. Any exported functions are
-# pinned so that they will never be garbage-collected.
+# Exports an already-defined function into the heap, returning its reference.
 bash_lambda_extern() {
-  bash_lambda_gc_pin $( (echo "#!/bin/bash"
-                         echo "$1_main() {"
-                         declare -f "$1" | grep '^  '
-                         echo "}"
-                         echo "$1_main \"\$@\"") | bash_lambda_cons -n $1); }
-
-bash_lambda_def() { rm -f $BASH_LAMBDA_HEAP/$1
-                    ln -s $2 $(bash_lambda_gc_pin $BASH_LAMBDA_HEAP/$1); }
+  bash_lambda_fn_body "$(declare -f $1 | grep '^  ')" | \
+    bash_lambda_cons extern; }
