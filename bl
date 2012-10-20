@@ -1,7 +1,7 @@
 #!/usr/bin/perl
 # 99aeabc9ec7fe80b1b39f5e53dc7e49e      <- self-modifying Perl magic
-# state:  d174bef41b0aad988e7c288d40f6b3da
-# istate: d7ba11cc10a2a22b4e2d2eed4626f5b3
+# state:  cc98a3d560d91ee3b5e3dc548e306dd0
+# istate: 42585eee9963d9db6ce204af91881999
 # id:     93802c334977a7afa375ec69536501b7
 
 # This is a self-modifying Perl file. I'm sorry you're viewing the source (it's
@@ -238,6 +238,8 @@ meta::meta('type::state', <<'__');
 meta::configure 'state', inherit => 0, extension => '.pl';
 meta::define_form 'state', \&meta::bootstrap::implementation;
 __
+meta::alias('ea', 'edit sdoc::bash::allocation');
+meta::alias('eg', 'edit sdoc::bash::gc');
 meta::alias('erf', 'edit function::render');
 meta::bootstrap('html', <<'__');
 <html>
@@ -1797,15 +1799,15 @@ alias bash-lambda-gc-roots='(declare; ps ax)'
 
 Shared heap GC.
 Any running shell can start a GC in the shared heap. In order to do this, it
-needs to grab the `.bash-lambda-gc` directory lock. If this directory exists,
-any shell that allocates an object must symlink the object into this directory.
-This informs the running GC that the object was allocated after the root set
-was retrieved, so the GC will conservatively consider the new allocation to be
-live whether it really is or not.
+needs to grab the `.gc` directory lock. If this directory exists, any shell
+that allocates an object must symlink the object into this directory. This
+informs the running GC that the object was allocated after the root set was
+retrieved, so the GC will conservatively consider the new allocation to be live
+whether it really is or not.
 
 declare -r heap_prefix=${TMPDIR:-/tmp}/bash-lambda-$(whoami)
 declare -r shared_heap=$heap_prefix/shared
-declare -r local_heap=$heap_prefix/$(hostname)-$$
+declare -r local_heap=$heap_prefix/local-$(hostname)-$$
 
 bash-lambda-mkheap() { mkdir -p $1; ln -s . $1/.weak; touch $1/.alive; }
 bash-lambda-mkheap $shared_heap
@@ -1827,7 +1829,7 @@ from local heaps to mark the global objects as live. You allocate stuff by
 calling the 'new' function:
 
 | $ seq 1 10 | new
-  /tmp/bash-lambda-spencertipping/hostname-5012/f00c965d...f162
+  /tmp/bash-lambda-spencertipping/local-hostname-5012/f00c965d...f162
   $ l=$(seq 1 10 | new)
   $ $map $($fn x 'echo $((x + 1))') $l
   2
@@ -1843,12 +1845,40 @@ higher-level abstraction.
 The 'new' function accepts an optional argument specifying the allocation
 directory. This argument defaults to the local heap.
 
-new() { declare temp=$(mktemp ${1:-$local_heap}/new-XXXXXXXXXXXX); cat > $temp
+Every object must be allocated using 'new'. As a result, every heap-allocated
+object will have a hash name, which for all practical purposes is not
+guessable. This provides some important guarantees about the accuracy of
+conservative garbage collection (see src/gc.md for details).
+
+new() { declare temp=$(mktemp ${1:-$local_heap}/.temp-XXXXXXXXXXXX); cat > $temp
         declare name=$(git hash-object $temp)
-        touch $shared_heap/.bash-lambda-gc/$name >& /dev/null && \
-          ln -s $shared_heap/$name $local_heap/ && \
-          mv $temp $shared_heap/$name && chmod 555 $shared_heap/$name && \
+        touch $local_heap/.gc/$name >& /dev/null
+        mv $temp $local_heap/$name && chmod 555 $local_heap/$name && \
           echo $local_heap/$name; }
+
+__
+meta::sdoc('bash::gc', <<'__');
+#!/bin/bash
+
+Garbage collector.
+Bash-lambda implements a generational conservative concurrent mark-sweep
+garbage collector. References are extracted from text files using grep, and
+symlinks are followed. Named pipes are not examined because this cannot be done
+transparently (and because it would block the garbage collector).
+
+In order for the GC to work concurrently, a few things must happen. First, it
+obtains a lock on the shared heap by creating a directory called
+$shared_heap/.gc. If this directory already exists, then the GC exits. Second,
+once a GC starts, any new allocations need to be referenced by symlinks in the
+heap's .gc directory. This prevents race conditions between the reference
+walker and local allocators.
+
+Local vs shared GC.
+The garbage collector is generational: local heaps are individually collected
+before the shared heap is. Therefore, an invariant is maintained: no objects in
+the shared heap can refer to local-heap objects. This invariant is enforced by
+the 'ref' function, which moves local-heap objects into the shared heap as
+necessary.
 
 __
 meta::sdoc('readme', <<'__');
