@@ -1,717 +1,88 @@
 #!/bin/bash
-# Bash-lambda
 
-# Source this file to create a function allocation space and enable first-class
-# functions in the shell. The heap will be deleted automatically when the shell
-# exits. See https://github.com/spencertipping/bash-lambda for documentation.
-
-# Bash-lambda disk-based heap
-
-# We need 128 bits of entropy for the heap directory name. This gives us
-# guarantees about the soundness of conservative garbage collection ... for the
-# rest of the story, see src/gc.
-
-# 128 bits total / 15 bits per random number = 9 numbers
-bash_lambda_genkey() { declare i
-                       for (( i = 0; i < 9; i += 1 )); do
-                         printf '%04x' $RANDOM; done; }
-
-# Allow the user to override the heap location if they want to. However, this
-# may compromise the effectiveness of conservative GC.
-export BASH_LAMBDA_KEY=$(bash_lambda_genkey)
-export BASH_LAMBDA_HEAP=${BASH_LAMBDA_HEAP:-${TMPDIR:-/tmp}/blheap-$$-$BASH_LAMBDA_KEY}
-
-mkdir -p "$BASH_LAMBDA_HEAP" || return 1
-ln -s "$BASH_LAMBDA_HEAP" "$BASH_LAMBDA_HEAP/.weak-references"
-date +%s > "$BASH_LAMBDA_HEAP/.last-gc"
-bash_lambda_nuke_heap() { [[ "${BASH_LAMBDA_HEAP:0:5}" == "/tmp/" ]] &&
-                          rm -rf "$BASH_LAMBDA_HEAP"; }
-trap bash_lambda_nuke_heap EXIT
-export PATH="$PATH:$BASH_LAMBDA_HEAP"
-
-# Heap allocation
-bash_lambda_gensym() { mktemp "$BASH_LAMBDA_HEAP/${1:-gensym}_XXXXXXXXXXXXXX"; }
-bash_lambda_gendir() { mktemp -d "$BASH_LAMBDA_HEAP/${1:-gensym}_XXXXXXXXXXX"; }
-
-bash_lambda_sym() { bash_lambda_gc_guard "$(bash_lambda_gensym "$@")"; }
-bash_lambda_dir() { bash_lambda_gc_guard "$(bash_lambda_gendir "$@")"; }
-
-bash_lambda_gc_guard() {
-  declare file=$1
-
-  # If garbage collection is in-progress, mark the object to prevent it from
-  # being collected this time around. We don't mark it as having been visited,
-  # however; doing that would cause anything it makes live to be collected
-  # erroneously.
-  touch "$BASH_LAMBDA_HEAP/.gc-marked-set/${file##*/}" >& /dev/null
-  echo "$file"; }
-
-bash_lambda_cons() {
-  if [[ $1 == '-n' ]]; then declare file=$BASH_LAMBDA_HEAP/$2
-  else                      declare file="$(bash_lambda_gensym $1)"; fi
-
-  cat > $(bash_lambda_gc_guard "$file") &&      # Take everything from stdin
-    chmod u+x "$file"                   &&      # All conses are executable
-    echo "$file"; }
-
-# Bash-lambda reference functions
-
-bash_lambda_ref() {
-  # Returns a reference to something in the heap. A reference is a function
-  # that, when run, echoes the thing it refers to. You need to create refs to
-  # point to heap objects if you can't expose variables (from ~/.bash-lambda,
-  # for example).
-  bash_lambda_fn "echo $1"; }
-
-# A weak reference is a path that resolves the same way as a regular path, but
-# that isn't followed by the garbage collector. src/heap sets up a symlink for
-# this purpose.
-bash_lambda_weak_ref() {
-  echo "$BASH_LAMBDA_HEAP/.weak-references/${1##$BASH_LAMBDA_HEAP/}"; }
-
-bash_lambda_ref_resolve() {
-  if [[ -e "$BASH_LAMBDA_HEAP/$1" ]]; then echo "$BASH_LAMBDA_HEAP/$1"
-  else                                     echo "$r"; fi; }
-
-bash_lambda_ref_snapshot() {
-  tar -czP $(bash_lambda_ref_closure "$1") | bash_lambda_cons snapshot; }
-
-bash_lambda_ref_intern() { cat ${1:--} | tar -xzP; }
-
-bash_lambda_ref_closure() {
-  declare visited=$(bash_lambda_dir) object=$(bash_lambda_ref_resolve "$1")
-  bash_lambda_ref_visit "$visited" "$object"
-  ls -d "$visited"/* | (declare x; while read x; do
-    echo "$BASH_LAMBDA_HEAP/${x##$visited/}"; done); }
-
-bash_lambda_ref_type() { declare base=${1##*/}; echo "${base%%_*}"; }
-
-bash_lambda_ref_visit() {
-  # The ref in question must be an object that exists in the heap. We expect it
-  # to be a full pathname, though the object itself should be a direct child of
-  # the heap directory.
-  declare directory=$1 ref=$2
-  declare ref_name="${ref#$BASH_LAMBDA_HEAP/}"
-
-  # Is this something that belongs to the GC?
-  [[ "$ref_name" == ".gc-marked-set"  ||
-     "$ref_name" == ".gc-visited-set" ]] && return 0
-
-  # No need to mark an object in a subdirectory. It isn't a direct child of the
-  # heap, so its storage is already being managed by the directory it belongs
-  # to.
-  if [[ ! ("$ref_name" =~ /) ]]; then
-    # Have we already visited this object? If so, no need to revisit it.
-    [[ -e "$directory/$ref_name" ]] && return 0
-
-    # Otherwise, mark the object and everything it points to.
-    touch "$directory/$ref_name"; fi
-
-  bash_lambda_ref_read "$ref" | bash_lambda_ref_children | (declare x
-    while read x; do bash_lambda_ref_visit "$directory" "$x"; done); }
-
-bash_lambda_ref_read() {
-  # Read the contents of the given object. The result will be an output stream
-  # suitable for consumption by bash_lambda_ref_children.
-  if   [[ -d "$1" ]]; then [[ -e "$1"/* ]] && ls -d "$1"/*
-  elif [[ -L "$1" ]]; then readlink "$1"
-  elif [[ -p "$1" ]]; then return 0
-  elif [[ -e "$1" ]]; then cat "$1"; fi; }
-
-bash_lambda_ref_children() {
-  # Locate occurrences of the heap directory. This name contains 128 bits of
-  # pseudorandom entropy, so we are unlikely to see it spuriously referenced.
-  # If we observe a path that exists, then we consider that to be a reference
-  # for GC purposes.
-
-  egrep -o "$BASH_LAMBDA_HEAP/[^ [:space:]/\)\}\"']+" | (declare ref
-    while read ref; do [[ -e "$ref" ]] && echo "$ref"; done); }
-
-# Bash-lambda concurrent mark-sweep garbage collector
-
-# BASH_LAMBDA_GC_SECONDS=0 will disable automatic GC
-# BASH_LAMBDA_GC_CONCURRENT=0 will cause GC to be synchronous
-export BASH_LAMBDA_GC_SECONDS=${BASH_LAMBDA_GC_SECONDS:-30}
-export BASH_LAMBDA_GC_CONCURRENT=${BASH_LAMBDA_GC_CONCURRENT:-1}
-
-mkdir -p "$BASH_LAMBDA_HEAP"/.gc-permanent
-
-# Can we see this unexported variable from the garbage collector? If not, then
-# we don't have access to the full root set. If you unset this, GC will refuse
-# to run. We need this to be a weak ref so the exported variable doesn't show
-# up in the root set by itself. These two variables should be identical modulo
-# path.
-BASH_LAMBDA_GC_CANARY=$(bash_lambda_cons < /dev/null)
-export BASH_LAMBDA_GC_KEY=$(bash_lambda_weak_ref $BASH_LAMBDA_GC_CANARY)
-
-# This function can be run asynchronously: bash_lambda_gc &. See
-# bash_lambda_auto_gc for an example. It knows which heap to run on, and it
-# echoes information about the number of objects and bytes reclaimed.
-bash_lambda_gc() {
-  # Avert disaster: never GC a heap unless it is in /tmp.
-  if [[ "${BASH_LAMBDA_HEAP:0:5}" != "/tmp/" ]]; then
-    echo 'bash_lambda_gc refuses to run because $BASH_LAMBDA_HEAP is set to'
-    echo 'a directory outside of /tmp/. If you really want to do this, you'
-    echo 'should do something like /tmp/../wherever.'
-    return 2; fi
-
-  # Try to acquire the GC lock. If we can't, another GC is probably running; so
-  # we exit immediately since GC is (ideally) idempotent.
-  mkdir "$BASH_LAMBDA_HEAP"/.gc-visited-set || return 1
-  mkdir -p "$BASH_LAMBDA_HEAP"/.gc-marked-set
-
-  # We have the lock. At this point the heap allocator will mark any new
-  # objects that are created, so we can use the root set that exists right now
-  # and start marking objects referenced by that root set.
-  bash_lambda_gc_roots | bash_lambda_ref_children | (declare x; while read x; do
-    bash_lambda_ref_visit "$BASH_LAMBDA_HEAP/.gc-visited-set" "$x"; done)
-
-  # We should mark the canary. If we haven't done this, then something is wrong
-  # with the root-set computation.
-  if [[ ! -e "$BASH_LAMBDA_HEAP/.gc-visited-set/${BASH_LAMBDA_GC_KEY##*/}" ]]
-  then
-    echo 'bash_lambda_gc cannot see the full root set. You should make sure'
-    echo 'it is being run as a function, not as an indirect script; try using'
-    echo 'bash_lambda_gc instead of just gc.'
-    rm -r "$BASH_LAMBDA_HEAP/".gc-{visited,marked}-set
-    return 1; fi
-
-  # Now nuke anything that isn't either marked or permanent.
-  ls -d "$BASH_LAMBDA_HEAP"/* | (
-    declare ref reclaimed=() reclaimed_size=0
-    while read ref; do
-      if [[ ! -e "$BASH_LAMBDA_HEAP/.gc-marked-set/${ref##*/}" &&
-            ! -e "$BASH_LAMBDA_HEAP/.gc-visited-set/${ref##*/}" &&
-            ! -e "$BASH_LAMBDA_HEAP/.gc-permanent/${ref##*/}" ]]; then
-        reclaimed+=("$ref")
-        reclaimed_size=$((reclaimed_size + $(du -sb "$ref" | cut -f 1)))
-        rm -rf "$ref"; fi; done
-    echo "${#reclaimed[@]} $reclaimed_size")
-
-  # We are now done. Remove the marked-set directory and echo some stats about
-  # the stuff we collected.
-  rm -rf "$BASH_LAMBDA_HEAP/".gc-{marked,visited}-set; }
-
-bash_lambda_auto_gc() {
-  # Trigger a concurrent GC if it's been more than some number of seconds since
-  # the last one. This turns out to be one of the few constant-time ways we can
-  # do this safely.
-  if (( $BASH_LAMBDA_GC_SECONDS &&
-        $(date +%s) - $(<"$BASH_LAMBDA_HEAP/.last-gc") >
-          $BASH_LAMBDA_GC_SECONDS )); then
-    date +%s > "$BASH_LAMBDA_HEAP/.last-gc"
-
-    # NOTE: Running GC concurrently is experimental and is known to have some
-    # problems unless done carefully. See comments in bash_lambda_gc for
-    # details.
-    if (( $BASH_LAMBDA_GC_CONCURRENT )); then
-      (bash_lambda_gc --concurrent >> "$BASH_LAMBDA_HEAP/.gc-log" &)
-    else
-      bash_lambda_gc >> "$BASH_LAMBDA_HEAP/.gc-log"
-    fi; fi; }
-
-bash_lambda_heap_stats() {
-  printf '%-20s %s\n%-20s %d\n%-20s %d\n' \
-    'heap size:' $(du -sh "$BASH_LAMBDA_HEAP" | cut -f 1) \
-    'objects:'   $(ls "$BASH_LAMBDA_HEAP" | wc -l) \
-    'permanent:' $(ls "$BASH_LAMBDA_HEAP/.gc-permanent" | wc -l); }
-
-bash_lambda_heap_ls() { cd "$BASH_LAMBDA_HEAP"; ls "$@"; }
-
-bash_lambda_gc_pin()   { touch "$BASH_LAMBDA_HEAP/.gc-permanent/${1##*/}";
-                         echo "$1"; }
-
-bash_lambda_gc_unpin() { rm -f "$BASH_LAMBDA_HEAP/.gc-permanent/${1##*/}";
-                         echo "$1"; }
-
-bash_lambda_gc_roots() {
-  declare; ps ax; ls -d "$BASH_LAMBDA_HEAP/.gc-permanent"/* | (declare x
-    while read x; do echo "$BASH_LAMBDA_HEAP/${x##*/}"; done); }
-
-# Bash-lambda function and closure allocation
-
-bash_lambda_fn_body() {
-  echo '#!/bin/bash'
-  declare i
-  for (( i = 1; i <= $#; i += 1 )); do
-    if (( $i < $# )); then echo "declare -r ${!i}=\$$i"
-    else                   echo "${!i}"; fi
-  done; }
-
-bash_lambda_fn() {
-  # Yup, we're allocating closures by writing to files and returning their
-  # names to the callers. This gives you controllable persistence, heap
-  # allocation, and the ability to reference the same closures across multiple
-  # processes.
-  bash_lambda_fn_body "$@" | bash_lambda_cons fn; }
-
-bash_lambda_cons_fn() {
-  # Same as bash_lambda_fn, but body is specified from stdin. Useful for
-  # multiline functions when used with heredocs.
-  (bash_lambda_fn_body "$@" ''; cat -) | bash_lambda_cons fn; }
-
-bash_lambda_defn() { declare name=$1; shift
-                     bash_lambda_gc_pin \
-                      $(bash_lambda_fn_body "$@" | bash_lambda_cons -n $name); }
-
-# Exports functions into named files in the heap. This allows them to reference
-# each other from inside heap-allocated closures. Any exported functions are
-# pinned so that they will never be garbage-collected.
-bash_lambda_extern() {
-  bash_lambda_gc_pin $( (echo "#!/bin/bash"
-                         echo "$1_main() {"
-                         declare -f "$1" | grep '^  '
-                         echo "}"
-                         echo "$1_main \"\$@\"") | bash_lambda_cons -n $1); }
-
-bash_lambda_def() { rm -f $BASH_LAMBDA_HEAP/$1
-                    ln -s $2 $(bash_lambda_gc_pin $BASH_LAMBDA_HEAP/$1); }
-
-# Bash-lambda functional programming constructs
-
-# $(comp $f $g $h) x = f $(g $(h x))
-# $(partial $f x) y  = f x y
-bash_lambda_comp() {
-  declare i body
-  for (( i = $#; i >= 1; i -= 1 )); do
-    if (( $i == $# )); then body="\$(${!i} \"\$@\")";
-    else                    body="\$(${!i} $body)"; fi
-  done
-  bash_lambda_fn "echo $body"; }
-
-bash_lambda_partial() {
-  bash_lambda_fn "$* \"\$@\""; }
-
-# Bash-lambda multimethods
-
-# These work only on fully-named parameters, not on stuff coming from stdin. If
-# we can observe the name, then we can extract the type from the beginning of
-# the filename. For example:
-#
-# $ future $f
-# /tmp/blheap-xxxx-xxxx/future_xxxxxxxx
-# $ ref_type $(future $f)
-# future
-# $
-#
-# We then prepend this to the multimethod name to get the specific function
-# name:
-#
-# $ defmulti get
-# $ get $(future $f)   -> future_get $(future $f)
-
-bash_lambda_defmulti() {
-  declare multi_name=$1
-  bash_lambda_defn $1 '$(bash_lambda_ref_type $1)_'$multi_name' "$@"'; }
-
-# Multimethod definitions for bash-lambda functions
-# state finished block notify  src/future
-# get                          src/future src/atom
-# unsafe_get                   src/atom
-# count                        src/list src/semaphore
-# grab release wrap            src/semaphore src/atom src/pipelock
-
-(declare method
- for method in state finished block notify \
-               get \
-               unsafe_get \
-               count \
-               grab release wrap; do
-   bash_lambda_defmulti $method; done) > /dev/null
-
-# Bash-lambda pipe locks
-
-# A pipe-lock is a way to block one process until another one lets it through.
-# This provides a way to block without polling, and is used internally by
-# futures.
-
-# WARNING
-# If you hand a pipelock to someone, you MUST block on it. If you don't, then
-# whoever attempts to unlock the pipelock will block, and this will result in
-# all kinds of problems and strange bugs.
-
-bash_lambda_pipelock() {
-  declare file=$(bash_lambda_sym pipelock)
-  rm $file && mkfifo $file
-  echo $file; }
-
-bash_lambda_pipelock_grab()    { cat $1 >& /dev/null; }
-bash_lambda_pipelock_release() { echo > $1; }
-
-# Bash-lambda semaphores and mutexes
-
-# Semaphores are directories that contain empty numbered subdirectories along
-# with an immutable file containing the capacity of the semaphore. Locking is
-# done by attempting to create one of these empty subdirectories, and ls -d |
-# wc -l is used to get the number of used entries.
-
-bash_lambda_semaphore() {
-  declare capacity=$1 semaphore=$(bash_lambda_dir semaphore)
-  echo $capacity > "$semaphore/capacity"
-  echo "$semaphore"; }
-
-bash_lambda_semaphore_grab() {
-  # Take an item from the semaphore; returns the item's identifier (a path, but
-  # you don't need to know this) and exit code 0 if successful, returns 1 and
-  # outputs nothing if unsuccessful.
-  declare semaphore=$1 i capacity=$(<"$1/capacity")
-  for (( i = 0; i < $capacity; i += 1 )); do
-    if mkdir "$semaphore/semaphore_$i" >& /dev/null; then
-      echo "$semaphore/semaphore_$i"; return 0; fi; done
-  return 1; }
-
-bash_lambda_semaphore_release() {
-  # Releases an item from the semaphore. You can just pass the item here; no
-  # need to pass the semaphore also.
-  rmdir "$1"; }
-
-bash_lambda_semaphore_count() {
-  # Counts the number of items available in the semaphore.
-  declare semaphore=$1
-  echo $(( $(<"$semaphore/capacity") + 1 - $(ls -d "$semaphore/"* | wc -l) )); }
-
-bash_lambda_semaphore_wrap() {
-  # Wraps a function's execution with a grab/release of a semaphore item.
-  declare s=$1 f=$2
-  bash_lambda_fn "declare lock
-                  if lock=\$(bash_lambda_semaphore_grab $s); then
-                    $f \"\$@\"
-                    declare status=\$?
-                    bash_lambda_semaphore_release \$lock
-                    exit \$status; fi"; }
-
-# Mutex: a more efficient way to do a single-element semaphore.
-bash_lambda_mutex()         { bash_lambda_dir mutex; }
-bash_lambda_mutex_grab()    { mkdir "$1/lock" >& /dev/null && echo "$1/lock"; }
-bash_lambda_mutex_release() { rmdir "$1"; }
-bash_lambda_mutex_count()   { [[ -d "$1/lock" ]]; echo $?; }
-
-bash_lambda_mutex_wrap() {
-  declare m=$1 f=$2
-  bash_lambda_fn "declare lock
-                  if lock=\$(bash_lambda_mutex_grab $m); then
-                    $f \"\$@\"
-                    declare status=\$?
-                    bash_lambda_mutex_release \$lock
-                    exit \$status; fi"; }
-
-# Bash-lambda atomic values
-
-# An atomic value supports thread-safe assignment and access. It does this by
-# guarding every read and write with a semaphore. You can also request a
-# transaction against the current value of an atomic value, so that during that
-# transaction any requests to change the value will block or fail.
-
-bash_lambda_atom() {
-  printf "%s\n%s" "$(bash_lambda_mutex)" \
-                  "$(echo "$1" | bash_lambda_cons)" | bash_lambda_cons atom; }
-
-bash_lambda_atom_grab() {
-  bash_lambda_mutex_grab "$(bash_lambda_nth 0 "$1")"; }
-
-bash_lambda_atom_release() { bash_lambda_mutex_release "$1"; }
-bash_lambda_atom_get()     { $(bash_lambda_atom_wrap "$1" cat); }
-
-# Unsafe-get is considerably faster than get, but does not respect the
-# atomicity of running transactions. Use this only when you have a single state
-# transition acting on the atom. (See src/future for an example)
-bash_lambda_atom_unsafe_get() { cat "$(bash_lambda_nth 1 "$1")"; }
-
-bash_lambda_atom_wrap() {
-  # A generalized transaction/set function. $(wrap $atom $f) does one of two
-  # things. If it acquires the atom's lock, then it invokes $f on a file
-  # containing the atom's current value. $f is free to modify the contents of
-  # this file.
-
-  # You will probably want to use one of the functions in src/wait instead of
-  # calling wrap directly.
-
-  declare atom=$1 f=$2
-  bash_lambda_fn "declare lock
-                  if lock=\$(bash_lambda_atom_grab $atom); then
-                    $f \"\$(bash_lambda_nth 1 $atom)\"
-                    declare status=\$?
-                    bash_lambda_atom_release \$lock
-                    exit \$status; fi"; }
-
-# Bash-lambda list programming constructs
-
-bash_lambda_list() { declare x
-                     for x; do echo "$x"; done | bash_lambda_cons list; }
-
-bash_lambda_nth()  { cat ${2:--} | head -n$(($1 + 1)) | tail -n1; }
-
-bash_lambda_take() { cat ${2:--} | head -n$1; }
-bash_lambda_drop() { cat ${2:--} | (head -n$1 > /dev/null; cat -); }
-
-# Here, 'map' works as both map and mapcat since cons and append are the same
-# operation. This arises due to the associativity of cons.
-bash_lambda_map() {
-  cat ${2:--} | (declare x; while read x; do $1 "$x"; done); }
-
-bash_lambda_reduce() {
-  declare f=$1 x=$2
-  cat ${3:--} | (declare y; while read y; do x="$($f "$x" "$y")"; done
-                            echo "$x"); }
-
-bash_lambda_reductions() {
-  declare f=$1 x=$2
-  cat ${3:--} | (declare y; while read y; do x="$($f "$x" "$y")"; echo "$x"
-                            done); }
-
-bash_lambda_filter() {
-  cat ${2:--} | (declare x; while read x; do
-                            $1 "$x" > /dev/null && echo "$x"; done); }
-
-bash_lambda_partition() {
-  cat ${2:--} | split -l $1 -u --filter='bash_lambda_cons list'; }
-
-# This is a multimethod that is normally invoked as just 'count'; e.g:
-# $ count $(list 1 2 3)
-# If you want to count lines from a stream, you should use wc -l instead.
-bash_lambda_list_count() { wc -l < "$1"; }
-
-# List generators
-bash_lambda_iterate() {
-  declare x=$2
-  echo "$x"; while x="$($1 "$x")"; do echo "$x"; done; }
-
-bash_lambda_repeatedly() {
-  declare i f=$1 n=$2
-  for (( i = 0; i != ${n:--1}; i += 1 )); do $f || return $?; done; }
-
-# Tests over lists
-bash_lambda_some() {
-  cat ${2:--} | (declare x; while read x; do
-                   if $1 "$x" > /dev/null; then
-                     echo "$x"; return 0; fi; done; return 1); }
-
-bash_lambda_every() {
-  cat ${2:--} | (declare x; while read x; do
-                  if ! $1 "$x" > /dev/null; then
-                    echo "$x"; return 1; fi; done; return 0); }
-
-# Bash-lambda futures (asynchronous processes)
-
-# Future locking
-# It is surprisingly difficult to reliably wait for a future. We can't use the
-# 'wait' command because the future could belong to another subshell. We can't
-# use the process table or /proc because PIDs get reused. This leaves us with
-# two options: we can use polling against some lock file, or we can devise some
-# scheme with pipelocks.
-#
-# It turns out that we can use a semaphore to do everything we need.
-
-bash_lambda_future() {
-  # Construct a future around the given function application. To do this, we
-  # run the function in the background and pipe its output to a temporary file.
-  # We also record its exit code.
-
-  declare output=$(bash_lambda_cons future_output < /dev/null)
-  declare status=$(bash_lambda_cons future_status < /dev/null)
-  declare state=$(bash_lambda_atom running)
-  declare result=$(printf $"%s\n%s\n%s\n" $output $status $state | \
-                   bash_lambda_cons future)
-
-  ("$@" > $output; echo $? > $status; notify $result) >& /dev/null &
-  echo $result; }
-
-bash_lambda_future_finished() {
-  # Exits with 0 if the future is finished, 1 if still running. If 0, a
-  # future_get call will block only on IO, but not on job completion. This
-  # operation can use unsafe_get because futures never un-finish.
-  [[ "$(bash_lambda_atom_unsafe_get "$(bash_lambda_nth 2 $1)")" == done ]]; }
-
-bash_lambda_future_state() {
-  bash_lambda_spin_wrap $(bash_lambda_nth 2 $1) cat; }
-
-bash_lambda_future_block() {
-  # Block on completion of the future. Spin-locks against the future's state.
-  declare pipelock=$(bash_lambda_spin_wrap $(bash_lambda_nth 2 $1) \
-    $(fn x "[[ \"\$(<\$x)\" == done ]] || bash_lambda_pipelock | tee -a \$x"))
-  [[ -z "$pipelock" ]] || bash_lambda_pipelock_grab $pipelock; }
-
-bash_lambda_future_notify() {
-  # Notify all listeners that this future is done. This amounts to unblocking
-  # all of the pipelocks that have been appended to the state.
-  bash_lambda_spin_wrap $(bash_lambda_nth 2 $1) \
-    $(fn x '[[ "$(<$x)" == done ]] || drop 1 $x | bash_lambda_map release
-            echo done > $x'); }
-
-bash_lambda_future_get() {
-  # This function blocks on the future's process if it is still running, and
-  # its stdout and exit code are proxied.
-  bash_lambda_future_finished "$1" || bash_lambda_future_block "$1"
-  cat "$(bash_lambda_nth 0 "$1")"
-  return "$(< "$(bash_lambda_nth 1 "$1")")"; }
-
-bash_lambda_future_unsafe_get() {
-  # Gets whatever stdout has been produced so far. The process may not have
-  # exited, so this function returns 0.
-  cat "$(bash_lambda_nth 0 "$1")"; }
-
-bash_lambda_future_transpose() {
-  bash_lambda_future $(bash_lambda_partial \
-    bash_lambda_map bash_lambda_future_get $1); }
-
-# Bash-lambda remote functions
-
-# Remote functions allow you to transparently migrate the execution of a
-# function to another machine. Any relevant heap state will be transferred
-# automatically. Remote functions use passwordless SSH and their stdin/stdout
-# and exit codes are transparently proxied.
-
-# Note that remote functions are run from the current $PWD, except that any
-# changes to $HOME are taken into account. For instance, if I'm spencertipping
-# on one computer and spencer on another, and I run this from ~/bin, then:
-#
-# $ remote the-spencertipping-machine $(fn 'echo $PWD')
-# /home/spencertipping/bin
-# $ remote the-spencer-machine $(fn 'echo $PWD')
-# /home/spencer/bin
-# $
-
-# If the remote command produces a nonzero exit code, then the heap snapshot is
-# preserved to help you find out what went wrong. You can get rid of old
-# snapshots on remote systems using remote_clean.
-
-bash_lambda_remote() {
-  declare host=$1 f=$2 cd_into=${PWD#$HOME/}
-  declare snapshot=$(bash_lambda_ref_snapshot $f)
-
-  declare path="export PATH=\"\$PATH:$BASH_LAMBDA_HEAP\""
-  declare pre="cd $cd_into && tar xzP"
-  declare clean="rm -rf \"$BASH_LAMBDA_HEAP\""
-
-  ssh $host "$pre && $path && $f && $clean" < $snapshot; }
-
-bash_lambda_remote_clean() {
-  # Removes this instance's heap snapshot from the remote instance.
-  ssh $host "rm -rf \"$BASH_LAMBDA_HEAP\""; }
-
-# Bash-lambda wait functions
-
-# Various ways to wait for things. Usually you would use this with semaphores,
-# but you could do it with any function.
-
-bash_lambda_poll_constantly()    { echo $1; }
-bash_lambda_poll_linearly()      { bash_lambda_fn "echo \$((\$1 + ${1:-1}))"; }
-bash_lambda_poll_exponentially() { bash_lambda_fn "echo \$((\$1 * ${1:-2}))"; }
-
-bash_lambda_waiting_fn() {
-  # Returns a thunk that waits for the given function to return true, polling
-  # constantly by default (you can change this by passing a polling interval
-  # function as the third argument). Echoes all output from the function. The
-  # second argument specifies the initial polling duration.
-  declare f=$1 delay=${2:-1} adjust=${3:-bash_lambda_poll_constantly}
-  bash_lambda_fn "declare delay=$delay
-                  until $f \"\$@\"; do sleep \$delay
-                    delay=\$($adjust \$delay); done"; }
-
-bash_lambda_wait_until() { $(bash_lambda_waiting_fn "$@"); }
-
-bash_lambda_spinning_fn() {
-  # Returns a thunk that spins until the given function returns true. This
-  # should be used only for very quick waits.
-  declare f=$1
-  bash_lambda_fn "until $f \"\$@\"; do :; done"; }
-
-bash_lambda_spin_until() { $(bash_lambda_spinning_fn "$@"); }
-
-bash_lambda_wait_wrap() { $(wait_until $(bash_lambda_partial wrap "$@")); }
-bash_lambda_spin_wrap() { $(spin_until $(bash_lambda_partial wrap "$@")); }
-
-# Bash-lambda parallel execution
-
-# Parallel tasks are defined as an interface that transposes parallelism over
-# lists. They generally return futures. You should set the
-# BASH_LAMBDA_PARALLELISM value to something more specific to your own system,
-# depending on available CPUs and memory.
-#
-# There is a considerable degree of overhead (on the order of seconds)
-# associated with using these parallel methods.
-
-export BASH_LAMBDA_PARALLELISM=4
-
-bash_lambda_parallel_map() {
-  # Maps a function over a list in parallel. Results retain their original
-  # order. An optional third parameter allows you to override the default level
-  # of parallelism.
-
-  # This function returns a list of futures, each of which represents an
-  # intermediate outcome. The futures are generated lazily, so in theory you
-  # could have an infinite source list and, so long as you requested only a
-  # finite number of elements, you would be ok. (In practice, I think this is a
-  # dangerous strategy.) To get the completed results for a segment of the
-  # list:
-  #
-  # $ get $(transpose $(list $(parallel_map $f $xs | take 5)))
-
-  # Note: If your function returns a nonzero exit code, it will be run again on
-  # the same data.
-
-  declare f=$1 xs=$2 n=${3:-$BASH_LAMBDA_PARALLELISM}
-  declare s=$(bash_lambda_semaphore $n)
-
-  declare blocking_f=$(bash_lambda_waiting_fn \
-                        $(bash_lambda_semaphore_wrap $s $f))
-
-  bash_lambda_map $(bash_lambda_partial bash_lambda_future $blocking_f) $xs; }
-
-# Bash-lambda rc file functions
-
-export BASH_LAMBDA_RC=${BASH_LAMBDA_RC:-$HOME/.bash-lambda}
-export BASH_LAMBDA_EDITOR=${BASH_LAMBDA_EDITOR:-${EDITOR:-$VISUAL}}
-
-bash_lambda_message() {
-  declare m="$*"
-  (( $COLUMNS )) && echo -en "\033[s\033[$((COLUMNS - ${#m}))G$m\033[u"; }
-
-bash_lambda_setup_rc() {
-  [[ -e "$BASH_LAMBDA_RC" ]] || sed 's/^  //' > "$BASH_LAMBDA_RC" \
-  <<<"#!/bin/bash
-  # You can put function defs here. Variables you define here aren't visible,
-  # since this file is always evaluated (usually asynchronously) from inside a
-  # subshell.
-  #
-  # This file is sourced asynchronously when you start your shell, so adding
-  # definitions won't increase the amount of time required to open a new
-  # terminal.
-  #
-  # See https://github.com/spencertipping/bash-lambda for details about
-  # defining functions.
-  #
-  # Examples:
-  #
-  # def my-computers \$(list host1 host2 host3)
-  # defn check-status 'hostname; df -h | grep  /$; uptime'
-  # defn check-computers 'map \$(partial remote check-status)'
-  #
-  "; }
-
-bash_lambda_reload_rc() {
-  [[ -e "$BASH_LAMBDA_RC" ]] && (. "$BASH_LAMBDA_RC" > /dev/null); }
-
-bash_lambda_defs() {
-  bash_lambda_setup_rc
-  $BASH_LAMBDA_EDITOR "$BASH_LAMBDA_RC"
-  (bash_lambda_reload_rc &); }
-
-# Bash-lambda function exporting and GC hooks
-
-# Export the bash_lambda library into the current heap
-bash_lambda_init() {
-  declare -f | grep '^bash_lambda' | sed 's/ .*//' |
-  (declare fn; while read fn; do
-    bash_lambda_extern $fn > /dev/null
-    if [[ -z "$BASH_LAMBDA_NO_ALIASES" ]]; then
-      bash_lambda_def ${fn##bash_lambda_} $fn; fi; done
-
-   bash_lambda_reload_rc
-   bash_lambda_message 'λ') & }
-
-(bash_lambda_init)
-
-# Run a GC, if necessary, after each command
-export PROMPT_COMMAND="$PROMPT_COMMAND; bash_lambda_auto_gc"
-
+# Introduction.
+# This file provides allocation, reference handling, and garbage collection.
+# Bash-lambda allocates objects into a common directory in the temporary
+# directory. Each running process maintains a separate directory containing its
+# own references; these directories are treated as parts of the root set for the
+# purposes of garbage-collecting the shared heap.
+
+# Objects in the shared heap are generally immutable once allocated. They are
+# also named after a hash of their contents (see the manpage for git-hash-object
+# for details). This second property is important: it means, for practical
+# purposes, that two files with the same name will have the same contents. This,
+# in turn, means that copying an object from one heap to another is idempotent,
+# and it makes it possible to share heap objects across machines via SSH.
+
+alias bash-lambda-hash='git hash-object --stdin'
+
+# Reference semantics.
+# There are four ways for a shell process to maintain a reference to an object in
+# the shared heap:
+
+# | 1. Define a variable that points to it (e.g. f=$heap_object_name)
+#   2. Start a process that knows about it (e.g. cat $heap_object_name)
+#   3. Reference it in the text contents of any file in its local heap
+#   4. Reference it as the symlink destination of any file in its local heap
+
+# All of these situations are garbage collector root cases: as long as the shell
+# is running, any object referred to by any of these methods will remain alive.
+
+alias bash-lambda-gc-roots='(declare; ps ax)'
+
+# Shared heap GC.
+# Any running shell can start a GC in the shared heap. In order to do this, it
+# needs to grab the `.bash-lambda-gc` directory lock. If this directory exists,
+# any shell that allocates an object must symlink the object into this directory.
+# This informs the running GC that the object was allocated after the root set
+# was retrieved, so the GC will conservatively consider the new allocation to be
+# live whether it really is or not.
+
+declare -r heap_prefix=${TMPDIR:-/tmp}/bash-lambda-$(whoami)
+declare -r shared_heap=$heap_prefix/shared
+declare -r local_heap=$heap_prefix/$(hostname)-$$
+
+bash-lambda-mkheap() { mkdir -p $1; ln -s . $1/.weak; touch $1/.alive; }
+bash-lambda-mkheap $shared_heap
+bash-lambda-mkheap $local_heap
+
+# Local heap expiration.
+# When the shell exits, we need to mark the local heap as being available for
+# collection. We don't nuke it immediately, since it is vaguely possible that
+# someone else is referring to it (like a background job, for instance). Rather,
+# we remove its .alive file so that the shared GC knows that the heap's objects
+# are no longer roots.
+
+bash-lambda-free-local-heap() { rm $local_heap/.alive; }
+trap bash-lambda-free-local-heap EXIT
+
+# Object allocation.
+# Objects are allocated as files into the global heap, and symlinks are created
+# from local heaps to mark the global objects as live. You allocate stuff by
+# calling the 'new' function:
+
+# | $ seq 1 10 | new
+#   /tmp/bash-lambda-spencertipping/hostname-5012/f00c965d...f162
+#   $ l=$(seq 1 10 | new)
+#   $ $map $($fn x 'echo $((x + 1))') $l
+#   2
+#   3
+#   ...
+#   11
+#   $
+
+# Unlike prior versions, this version of bash-lambda does not integrate reference
+# types into the allocation strategy. Runtime type information is encoded as a
+# higher-level abstraction.
+
+# The 'new' function accepts an optional argument specifying the allocation
+# directory. This argument defaults to the local heap.
+
+new() { declare temp=$(mktemp ${1:-$local_heap}/new-XXXXXXXXXXXX); cat > $temp
+        declare name=$(git hash-object $temp)
+        touch $shared_heap/.bash-lambda-gc/$name >& /dev/null && \
+          ln -s $shared_heap/$name $local_heap/ && \
+          mv $temp $shared_heap/$name && chmod 555 $shared_heap/$name && \
+          echo $local_heap/$name; }
+
+# Generated by SDoc
