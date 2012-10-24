@@ -196,7 +196,8 @@ bash_lambda_auto_gc() {
   # Trigger a concurrent GC if it's been more than some number of seconds since
   # the last one. This turns out to be one of the few constant-time ways we can
   # do this safely.
-  if (( $BASH_LAMBDA_GC_SECONDS &&
+  if [[ ! -e "$BASH_LAMBDA_HEAP/.last-gc" ]] || \
+     (( $BASH_LAMBDA_GC_SECONDS &&
         $(date +%s) - $(<"$BASH_LAMBDA_HEAP/.last-gc") >
           $BASH_LAMBDA_GC_SECONDS )); then
     date +%s > "$BASH_LAMBDA_HEAP/.last-gc"
