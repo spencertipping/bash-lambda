@@ -24,8 +24,11 @@ export BASH_LAMBDA_HEAP=${BASH_LAMBDA_HEAP:-${TMPDIR:-/tmp}/blheap-$$-$BASH_LAMB
 mkdir -p "$BASH_LAMBDA_HEAP" || return 1
 ln -s "$BASH_LAMBDA_HEAP" "$BASH_LAMBDA_HEAP/.weak-references"
 date +%s > "$BASH_LAMBDA_HEAP/.last-gc"
-bash_lambda_nuke_heap() { [[ "${BASH_LAMBDA_HEAP:0:5}" == "/tmp/" ]] &&
-                          rm -rf "$BASH_LAMBDA_HEAP"; }
+
+bash_lambda_nuke_heap() {
+  [[ -e "$BASH_LAMBDA_HEAP/.gc-pid" ]] && kill $(<"$BASH_LAMBDA_HEAP/.gc-pid")
+  [[ "${BASH_LAMBDA_HEAP:0:5}" == "/tmp/" ]] && rm -rf "$BASH_LAMBDA_HEAP"; }
+
 trap bash_lambda_nuke_heap EXIT
 export PATH="$PATH:$BASH_LAMBDA_HEAP"
 
@@ -159,6 +162,8 @@ bash_lambda_gc() {
   # we exit immediately since GC is (ideally) idempotent.
   mkdir "$BASH_LAMBDA_HEAP"/.gc-visited-set || return 1
   mkdir -p "$BASH_LAMBDA_HEAP"/.gc-marked-set
+
+  echo $$ > "$BASH_LAMBDA_HEAP"/.gc-pid
 
   # We have the lock. At this point the heap allocator will mark any new
   # objects that are created, so we can use the root set that exists right now

@@ -32,6 +32,8 @@ bash_lambda_gc() {
   mkdir "$BASH_LAMBDA_HEAP"/.gc-visited-set || return 1
   mkdir -p "$BASH_LAMBDA_HEAP"/.gc-marked-set
 
+  echo $$ > "$BASH_LAMBDA_HEAP"/.gc-pid
+
   # We have the lock. At this point the heap allocator will mark any new
   # objects that are created, so we can use the root set that exists right now
   # and start marking objects referenced by that root set.
