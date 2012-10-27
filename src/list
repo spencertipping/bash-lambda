@@ -7,7 +7,7 @@ bash_lambda_list() { declare x
 bash_lambda_nth()  { cat ${2:--} | head -n$(($1 + 1)) | tail -n1; }
 
 bash_lambda_take() { cat ${2:--} | head -n$1; }
-bash_lambda_drop() { cat ${2:--} | (head -n$1 > /dev/null; cat -); }
+bash_lambda_drop() { cat ${2:--} | tail -n+$(($1 + 1)); }
 
 # Here, 'map' works as both map and mapcat since cons and append are the same
 # operation. This arises due to the associativity of cons.
