@@ -35,3 +35,7 @@ bash_lambda_extern() {
 
 bash_lambda_def() { rm -f $BASH_LAMBDA_HEAP/$1
                     ln -s $2 $(bash_lambda_gc_pin $BASH_LAMBDA_HEAP/$1); }
+
+bash_lambda_defalias() {
+  declare name=$1; shift
+  bash_lambda_def "$name" $(bash_lambda_cons_fn <<<"$*"); }
