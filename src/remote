@@ -21,7 +21,7 @@
 # snapshots on remote systems using remote_clean.
 
 bash_lambda_remote() {
-  declare host=$1 f=$2 cd_into=${PWD#$HOME}
+  declare host=$1 f=$2 cd_into=${PWD#$HOME?}
   declare snapshot=$(bash_lambda_ref_snapshot $f)
 
   declare path="export PATH=\"\$PATH:$BASH_LAMBDA_HEAP\""
