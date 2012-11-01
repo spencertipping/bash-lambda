@@ -16,11 +16,36 @@ $ git clone git://github.com/spencertipping/bash-lambda
 $ source bash-lambda/bash-lambda
 ```
 
+*Before you do this, be aware that bash-lambda garbage-collects a part of your
+filesystem. Think about what might theoretically go wrong with this.* I source
+it in my .bashrc without problems, but as always, your mileage may vary.
+
+Sourcing `bash-lambda` will do a few things:
+
+1. Create a heap directory in `$TMPDIR` (usually `/tmp`)
+2. Add this heap directory to your `$PATH`
+3. Add the asynchronous GC hook to your `$PROMPT_COMMAND`
+4. Add lots of variables and functions to your shell process
+5. Add an `EXIT` trap to nuke the heap directory
+
 Loading the library takes very little time even though a new heap is created
 for every process. This is because the heap setup and sourcing of your
 `.bash-lambda` file (run `defs` to edit it) is all done asynchronously. When
 the background initialization is complete, a small `λ` will appear in the
 rightmost column of your window.
+
+You can write arbitrary text to the right-hand side of the terminal by using
+the `message` function:
+
+```
+$ message hi
+$                                             hi
+```
+
+Before getting started, go ahead and run `defs` once. This will initialize your
+`~/.bash-lambda` file with some useful functions for common file operations. If
+you already have a `~/.bash-lambda` file from an earlier version, you can stash
+it somewhere, run `defs`, and then merge in previous definitions.
 
 ## Defining functions
 
@@ -175,6 +200,15 @@ $ seq 1 4 | reductions $add 0
 6
 10
 $
+```
+
+Filtering is useful when working with files, especially in conjunction with
+some builtins that come with the standard `~/.bash-lambda` file. For example:
+
+```
+$ ls | filter is-d      # same as ls | filter $(fn '[[ -d $1 ]]')
+src
+$ ls | filter $(newerthan build)
 ```
 
 ### Flatmap (mapcat in Clojure)
@@ -363,6 +397,29 @@ $
 
 The exit code is also memoized; however, standard error and other side-effects
 are not. There is no way to clear a future after it has finished executing.
+
+### Mapping
+
+You can use the `future_map` function to transform the output of a future when
+it completes. You can also use this to trigger alerts. For example:
+
+```
+$ f=$(future $(fn 'sleep 10'))
+$ future_map $f $(fn 'message done')
+$
+```
+
+If you do this, the word 'done' will show up on the right side of the terminal
+in a few seconds.
+
+Command output is usually captured by the future. The only reason `message`
+works is that it prints to standard error, which is let through synchronously.
+This way you can immediately observe failures in future processes.
+
+Note that `future_map` is not a multimethod. The reason is that the regular
+`map` function needs to be able to process stdin, which has no `ref_type`. As a
+result, `map` is not a multimethod, so by extension, `future_map` is not an
+implementation of `map`.
 
 ### Partial results
 

@@ -5,6 +5,7 @@
 # functions in the shell. The heap will be deleted automatically when the shell
 # exits. See https://github.com/spencertipping/bash-lambda for documentation.
 
+#!/bin/bash
 # Bash-lambda disk-based heap
 
 # We need 128 bits of entropy for the heap directory name. This gives us
@@ -56,7 +57,7 @@ bash_lambda_cons() {
   cat > $(bash_lambda_gc_guard "$file") &&      # Take everything from stdin
     chmod u+x "$file"                   &&      # All conses are executable
     echo "$file"; }
-
+#!/bin/bash
 # Bash-lambda reference functions
 
 bash_lambda_ref() {
@@ -129,7 +130,7 @@ bash_lambda_ref_children() {
 
   egrep -o "$BASH_LAMBDA_HEAP/[^ [:space:]/\)\}\"']+" | (declare ref
     while read ref; do [[ -e "$ref" ]] && echo "$ref"; done); }
-
+#!/bin/bash
 # Bash-lambda concurrent mark-sweep garbage collector
 
 # BASH_LAMBDA_GC_SECONDS=0 will disable automatic GC
@@ -233,7 +234,7 @@ bash_lambda_gc_unpin() { rm -f "$BASH_LAMBDA_HEAP/.gc-permanent/${1##*/}";
 bash_lambda_gc_roots() {
   declare; ps ax; ls -d "$BASH_LAMBDA_HEAP/.gc-permanent"/* | (declare x
     while read x; do echo "$BASH_LAMBDA_HEAP/${x##*/}"; done); }
-
+#!/bin/bash
 # Bash-lambda function and closure allocation
 
 bash_lambda_fn_body() {
@@ -265,14 +266,12 @@ bash_lambda_defn() { declare name=$1; shift
 # pinned so that they will never be garbage-collected.
 bash_lambda_extern() {
   bash_lambda_gc_pin $( (echo "#!/bin/bash"
-                         echo "$1_main() {"
-                         declare -f "$1" | grep '^  '
-                         echo "}"
-                         echo "$1_main \"\$@\"") | bash_lambda_cons -n $1); }
+                         declare -f "$1"
+                         echo "$1 \"\$@\"") | bash_lambda_cons -n $1); }
 
 bash_lambda_def() { rm -f $BASH_LAMBDA_HEAP/$1
                     ln -s $2 $(bash_lambda_gc_pin $BASH_LAMBDA_HEAP/$1); }
-
+#!/bin/bash
 # Bash-lambda functional programming constructs
 
 # $(comp $f $g $h) x = f $(g $(h x))
@@ -287,7 +286,7 @@ bash_lambda_comp() {
 
 bash_lambda_partial() {
   bash_lambda_fn "$* \"\$@\""; }
-
+#!/bin/bash
 # Bash-lambda multimethods
 
 # These work only on fully-named parameters, not on stuff coming from stdin. If
@@ -324,7 +323,7 @@ bash_lambda_defmulti() {
                count \
                grab release wrap; do
    bash_lambda_defmulti $method; done) > /dev/null
-
+#!/bin/bash
 # Bash-lambda pipe locks
 
 # A pipe-lock is a way to block one process until another one lets it through.
@@ -343,7 +342,7 @@ bash_lambda_pipelock() {
 
 bash_lambda_pipelock_grab()    { cat $1 >& /dev/null; }
 bash_lambda_pipelock_release() { echo > $1; }
-
+#!/bin/bash
 # Bash-lambda semaphores and mutexes
 
 # Semaphores are directories that contain empty numbered subdirectories along
@@ -400,7 +399,7 @@ bash_lambda_mutex_wrap() {
                     declare status=\$?
                     bash_lambda_mutex_release \$lock
                     exit \$status; fi"; }
-
+#!/bin/bash
 # Bash-lambda atomic values
 
 # An atomic value supports thread-safe assignment and access. It does this by
@@ -439,7 +438,7 @@ bash_lambda_atom_wrap() {
                     declare status=\$?
                     bash_lambda_atom_release \$lock
                     exit \$status; fi"; }
-
+#!/bin/bash
 # Bash-lambda list programming constructs
 
 bash_lambda_list() { declare x
@@ -496,7 +495,7 @@ bash_lambda_every() {
   cat ${2:--} | (declare x; while read x; do
                   if ! $1 "$x" > /dev/null; then
                     echo "$x"; return 1; fi; done; return 0); }
-
+#!/bin/bash
 # Bash-lambda futures (asynchronous processes)
 
 # Future locking
@@ -519,7 +518,7 @@ bash_lambda_future() {
   declare result=$(printf $"%s\n%s\n%s\n" $output $status $state | \
                    bash_lambda_cons future)
 
-  ("$@" > $output; echo $? > $status; notify $result) >& /dev/null &
+  ("$@" > $output; echo $? > $status; notify $result) > /dev/null &
   echo $result; }
 
 bash_lambda_future_finished() {
@@ -551,6 +550,10 @@ bash_lambda_future_get() {
   cat "$(bash_lambda_nth 0 "$1")"
   return "$(< "$(bash_lambda_nth 1 "$1")")"; }
 
+bash_lambda_future_map() {
+  # Returns a future of a function applied to this future's value.
+  bash_lambda_future $(fn "$2 \$(future_get $1)"); }
+
 bash_lambda_future_unsafe_get() {
   # Gets whatever stdout has been produced so far. The process may not have
   # exited, so this function returns 0.
@@ -559,7 +562,7 @@ bash_lambda_future_unsafe_get() {
 bash_lambda_future_transpose() {
   bash_lambda_future $(bash_lambda_partial \
     bash_lambda_map bash_lambda_future_get $1); }
-
+#!/bin/bash
 # Bash-lambda remote functions
 
 # Remote functions allow you to transparently migrate the execution of a
@@ -594,7 +597,7 @@ bash_lambda_remote() {
 bash_lambda_remote_clean() {
   # Removes this instance's heap snapshot from the remote instance.
   ssh $host "rm -rf \"$BASH_LAMBDA_HEAP\""; }
-
+#!/bin/bash
 # Bash-lambda wait functions
 
 # Various ways to wait for things. Usually you would use this with semaphores,
@@ -626,7 +629,7 @@ bash_lambda_spin_until() { $(bash_lambda_spinning_fn "$@"); }
 
 bash_lambda_wait_wrap() { $(wait_until $(bash_lambda_partial wrap "$@")); }
 bash_lambda_spin_wrap() { $(spin_until $(bash_lambda_partial wrap "$@")); }
-
+#!/bin/bash
 # Bash-lambda parallel execution
 
 # Parallel tasks are defined as an interface that transposes parallelism over
@@ -663,37 +666,48 @@ bash_lambda_parallel_map() {
                         $(bash_lambda_semaphore_wrap $s $f))
 
   bash_lambda_map $(bash_lambda_partial bash_lambda_future $blocking_f) $xs; }
-
+#!/bin/bash
 # Bash-lambda rc file functions
 
 export BASH_LAMBDA_RC=${BASH_LAMBDA_RC:-$HOME/.bash-lambda}
 export BASH_LAMBDA_EDITOR=${BASH_LAMBDA_EDITOR:-${EDITOR:-$VISUAL}}
 
+export COLUMNS  # so that bash_lambda_message can be called from subshells
+
 bash_lambda_message() {
   declare m="$*"
-  (( $COLUMNS )) && echo -en "\033[s\033[$((COLUMNS - ${#m}))G$m\033[u"; }
+  (( $COLUMNS )) && echo -en "\033[s\033[$((COLUMNS - ${#m}))G$m\033[u" 1>&2; }
 
 bash_lambda_setup_rc() {
-  [[ -e "$BASH_LAMBDA_RC" ]] || sed 's/^  //' > "$BASH_LAMBDA_RC" \
-  <<<"#!/bin/bash
-  # You can put function defs here. Variables you define here aren't visible,
-  # since this file is always evaluated (usually asynchronously) from inside a
-  # subshell.
-  #
-  # This file is sourced asynchronously when you start your shell, so adding
-  # definitions won't increase the amount of time required to open a new
-  # terminal.
-  #
-  # See https://github.com/spencertipping/bash-lambda for details about
-  # defining functions.
-  #
-  # Examples:
-  #
-  # def my-computers \$(list host1 host2 host3)
-  # defn check-status 'hostname; df -h | grep  /$; uptime'
-  # defn check-computers 'map \$(partial remote check-status)'
-  #
-  "; }
+  [[ -e "$BASH_LAMBDA_RC" ]] || sed 's/^  //' > "$BASH_LAMBDA_RC" <<'EOF'
+#!/bin/bash
+# You can put function defs here. Variables you define here aren't visible,
+# since this file is always evaluated (usually asynchronously) from inside a
+# subshell.
+#
+# This file is sourced asynchronously when you start your shell, so adding
+# definitions won't increase the amount of time required to open a new
+# terminal.
+#
+# See https://github.com/spencertipping/bash-lambda for details about
+# defining functions.
+#
+# For example:
+
+# File tests (wrappers for -d, -x, etc)
+def  bash_tests $(ref $(list a b c d e f g h k p r s t u w x G L N O S z n))
+defn deffiletest x 'defn is-$x f "[[ -$x \$f ]]"'
+map deffiletest $(bash_tests)
+
+defn newerthan file 'bash_lambda_fn f "[[ \$f -nt $file ]]"'
+defn olderthan file 'bash_lambda_fn f "[[ \$f -ot $file ]]"'
+defn eq        file 'bash_lambda_fn f "[[ \$f -ef $file ]]"'
+
+# Content tests
+defn contains pattern 'egrep -o $pattern'
+defn without pattern  'sed "s/${pattern/\//\\\/}//g"'
+EOF
+}
 
 bash_lambda_reload_rc() {
   [[ -e "$BASH_LAMBDA_RC" ]] && (. "$BASH_LAMBDA_RC" > /dev/null); }
@@ -702,7 +716,7 @@ bash_lambda_defs() {
   bash_lambda_setup_rc
   $BASH_LAMBDA_EDITOR "$BASH_LAMBDA_RC"
   (bash_lambda_reload_rc &); }
-
+#!/bin/bash
 # Bash-lambda function exporting and GC hooks
 
 # Export the bash_lambda library into the current heap
@@ -720,4 +734,3 @@ bash_lambda_init() {
 
 # Run a GC, if necessary, after each command
 export PROMPT_COMMAND="$PROMPT_COMMAND; bash_lambda_auto_gc"
-

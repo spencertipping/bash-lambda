@@ -1,11 +1,6 @@
 #!/bin/bash
 (cat src/header
- for file in heap ref gc fn fp multi \
-             pipelock semaphore atom \
-             list \
-             future remote wait parallel \
-             rc init; do
-  cat src/$file | grep -v '^#!'
-  echo; done) > bash-lambda
+ cat src/{heap,ref,gc,fn,fp,multi,pipelock,semaphore,atom} \
+     src/{list,future,remote,wait,parallel,rc,init}) > bash-lambda
 
 chmod +x bash-lambda

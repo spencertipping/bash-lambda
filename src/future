@@ -21,7 +21,7 @@ bash_lambda_future() {
   declare result=$(printf $"%s\n%s\n%s\n" $output $status $state | \
                    bash_lambda_cons future)
 
-  ("$@" > $output; echo $? > $status; notify $result) >& /dev/null &
+  ("$@" > $output; echo $? > $status; notify $result) > /dev/null &
   echo $result; }
 
 bash_lambda_future_finished() {
@@ -52,6 +52,10 @@ bash_lambda_future_get() {
   bash_lambda_future_finished "$1" || bash_lambda_future_block "$1"
   cat "$(bash_lambda_nth 0 "$1")"
   return "$(< "$(bash_lambda_nth 1 "$1")")"; }
+
+bash_lambda_future_map() {
+  # Returns a future of a function applied to this future's value.
+  bash_lambda_future $(fn "$2 \$(future_get $1)"); }
 
 bash_lambda_future_unsafe_get() {
   # Gets whatever stdout has been produced so far. The process may not have

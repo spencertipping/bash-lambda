@@ -4,31 +4,42 @@
 export BASH_LAMBDA_RC=${BASH_LAMBDA_RC:-$HOME/.bash-lambda}
 export BASH_LAMBDA_EDITOR=${BASH_LAMBDA_EDITOR:-${EDITOR:-$VISUAL}}
 
+export COLUMNS  # so that bash_lambda_message can be called from subshells
+
 bash_lambda_message() {
   declare m="$*"
-  (( $COLUMNS )) && echo -en "\033[s\033[$((COLUMNS - ${#m}))G$m\033[u"; }
+  (( $COLUMNS )) && echo -en "\033[s\033[$((COLUMNS - ${#m}))G$m\033[u" 1>&2; }
 
 bash_lambda_setup_rc() {
-  [[ -e "$BASH_LAMBDA_RC" ]] || sed 's/^  //' > "$BASH_LAMBDA_RC" \
-  <<<"#!/bin/bash
-  # You can put function defs here. Variables you define here aren't visible,
-  # since this file is always evaluated (usually asynchronously) from inside a
-  # subshell.
-  #
-  # This file is sourced asynchronously when you start your shell, so adding
-  # definitions won't increase the amount of time required to open a new
-  # terminal.
-  #
-  # See https://github.com/spencertipping/bash-lambda for details about
-  # defining functions.
-  #
-  # Examples:
-  #
-  # def my-computers \$(list host1 host2 host3)
-  # defn check-status 'hostname; df -h | grep  /$; uptime'
-  # defn check-computers 'map \$(partial remote check-status)'
-  #
-  "; }
+  [[ -e "$BASH_LAMBDA_RC" ]] || sed 's/^  //' > "$BASH_LAMBDA_RC" <<'EOF'
+#!/bin/bash
+# You can put function defs here. Variables you define here aren't visible,
+# since this file is always evaluated (usually asynchronously) from inside a
+# subshell.
+#
+# This file is sourced asynchronously when you start your shell, so adding
+# definitions won't increase the amount of time required to open a new
+# terminal.
+#
+# See https://github.com/spencertipping/bash-lambda for details about
+# defining functions.
+#
+# For example:
+
+# File tests (wrappers for -d, -x, etc)
+def  bash_tests $(ref $(list a b c d e f g h k p r s t u w x G L N O S z n))
+defn deffiletest x 'defn is-$x f "[[ -$x \$f ]]"'
+map deffiletest $(bash_tests)
+
+defn newerthan file 'bash_lambda_fn f "[[ \$f -nt $file ]]"'
+defn olderthan file 'bash_lambda_fn f "[[ \$f -ot $file ]]"'
+defn eq        file 'bash_lambda_fn f "[[ \$f -ef $file ]]"'
+
+# Content tests
+defn contains pattern 'egrep -o $pattern'
+defn without pattern  'sed "s/${pattern/\//\\\/}//g"'
+EOF
+}
 
 bash_lambda_reload_rc() {
   [[ -e "$BASH_LAMBDA_RC" ]] && (. "$BASH_LAMBDA_RC" > /dev/null); }
