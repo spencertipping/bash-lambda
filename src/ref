@@ -16,7 +16,7 @@ bash_lambda_weak_ref() {
 
 bash_lambda_ref_resolve() {
   if [[ -e "$BASH_LAMBDA_HEAP/$1" ]]; then echo "$BASH_LAMBDA_HEAP/$1"
-  else                                     echo "$r"; fi; }
+  else                                     echo "$1"; fi; }
 
 bash_lambda_ref_snapshot() {
   tar -czP $(bash_lambda_ref_closure "$1") | bash_lambda_cons snapshot; }
