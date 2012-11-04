@@ -12,7 +12,8 @@ bash_lambda_init() {
    bash_lambda_reload_rc
    bash_lambda_message 'λ') & }
 
-(bash_lambda_init)
+# Initialize the heap only if we own it.
+[[ "$BASH_LAMBDA_OWN_HEAP" == yes ]] && (bash_lambda_init)
 
 # Run a GC, if necessary, after each command
-export PROMPT_COMMAND="$PROMPT_COMMAND; bash_lambda_auto_gc"
+export PROMPT_COMMAND="${PROMPT_COMMAND:-:}; bash_lambda_auto_gc"
