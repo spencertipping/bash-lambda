@@ -19,9 +19,11 @@ bash_lambda_genkey() { declare i
 export BASH_LAMBDA_KEY=$(bash_lambda_genkey)
 export BASH_LAMBDA_HEAP=${BASH_LAMBDA_HEAP:-${TMPDIR:-/tmp}/blheap-$$-$BASH_LAMBDA_KEY}
 
-mkdir -p "$BASH_LAMBDA_HEAP" || return 1
-ln -s "$BASH_LAMBDA_HEAP" "$BASH_LAMBDA_HEAP/.weak-references"
-date +%s > "$BASH_LAMBDA_HEAP/.last-gc"
+if [[ "$BASH_LAMBDA_OWN_HEAP" == yes ]]; then
+  mkdir -p "$BASH_LAMBDA_HEAP" || return 1
+  ln -s "$BASH_LAMBDA_HEAP" "$BASH_LAMBDA_HEAP/.weak-references"
+  date +%s > "$BASH_LAMBDA_HEAP/.last-gc"
+fi
 
 bash_lambda_nuke_heap() {
   [[ -e "$BASH_LAMBDA_HEAP/.gc-pid" ]] && kill $(<"$BASH_LAMBDA_HEAP/.gc-pid")
