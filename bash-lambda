@@ -158,6 +158,11 @@ export BASH_LAMBDA_GC_KEY=$(bash_lambda_weak_ref $BASH_LAMBDA_GC_CANARY)
 # bash_lambda_auto_gc for an example. It knows which heap to run on, and it
 # echoes information about the number of objects and bytes reclaimed.
 bash_lambda_gc() {
+  # Fix a bug wherein the asynchronous GC can run with a PWD on another
+  # filesystem, preventing that filesystem from being unmounted while the GC is
+  # happening (despite the fact that the GC itself doesn't use the PWD).
+  cd
+
   # Avert disaster: never GC a heap unless it is in /tmp.
   if [[ "${BASH_LAMBDA_HEAP:0:5}" != "/tmp/" ]]; then
     echo 'bash_lambda_gc refuses to run because $BASH_LAMBDA_HEAP is set to'
