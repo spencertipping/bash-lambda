@@ -1,5 +1,10 @@
 # Bash lambda
 
+**Note:** Since [switching to zsh for performance
+reasons](http://spencertipping.com/posts/2013.0814.bash-is-irrecoverably-broken.html)
+I'm no longer actively maintaining this project. I'll probably write something
+similar for zsh, but hopefully much faster since zsh has real hash support.
+
 Real lambda support for bash (a functionally complete hack). Includes a set of
 functions for functional programming, list allocation and traversal, futures,
 complete closure serialization, remote closure execution, multimethods, and
