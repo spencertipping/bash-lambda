@@ -12,6 +12,13 @@ concurrent mark/sweep garbage collection with weak reference support.
 
 MIT license as usual.
 
+## Try it with Docker
+So you don't garbage-collect any heapfiles on your real filesystem.
+
+```sh
+$ docker run --rm -it spencertipping/bash-lambda
+```
+
 ## Getting started
 
 Load the library into your shell (the `source` line can go into .bashrc):
